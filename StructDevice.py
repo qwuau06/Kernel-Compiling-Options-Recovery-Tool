@@ -83,6 +83,12 @@ class StructDevice:
     Options = []
     complete = False
 
+    class Option:
+        def __init__(self,name, bound):
+            self.name = name
+            self.bound = bound
+
+
     def __init__(self,name):
         self.name = name
         if not StructDevice.complete:
