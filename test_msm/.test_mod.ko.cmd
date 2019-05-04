@@ -1,0 +1,1 @@
+cmd_/home/delta67/Projects/module_fuzzing/src/test_msm/test_mod.ko := arm-none-eabi-ld -EL -r  -T /home/delta67/Projects/msm-3.18/scripts/module-common.lds --build-id  -o /home/delta67/Projects/module_fuzzing/src/test_msm/test_mod.ko /home/delta67/Projects/module_fuzzing/src/test_msm/test_mod.o /home/delta67/Projects/module_fuzzing/src/test_msm/test_mod.mod.o
