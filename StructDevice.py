@@ -43,7 +43,7 @@ class StructDevice:
             "class",            # 4
             "groups",           # 4
             "dev",              # 4
-            "__end__"           # 0, placeholder
+            "__end__"           # placeholder
             ]
     SubMembers = {}
     SubMembers["mutex"] = [
