@@ -23,6 +23,11 @@ static struct file_operations fops = {
 	.release = device_release	
 };
 
+struct test_struct {
+	u32	t32;
+	u64	t64;
+};
+
 int init_module_jique(void){
 	Major = register_chrdev(0, DEVICE_NAME, &fops);
 	if (Major<0){
@@ -54,22 +59,16 @@ static int device_release(struct inode* inode, struct file * fp){
 }
 
 static ssize_t device_read(struct file* fp, char * buf, size_t rlength, loff_t *offset){
-	struct device dev;
-	long tmp=0;
+	struct test_struct tst;
 	unsigned long tmp0,tmp1;
 	long* p;
 	p = 42;
 	printk(KERN_INFO "Jique start0\n");
-	tmp0 = (unsigned long)(void*)(&(dev.dma_mem));
-	tmp1 = (unsigned long)(void*)(&dev);
-	tmp = tmp0-tmp1;
-	*p = tmp;
+	tmp0 = (unsigned long)(void*)(&tst.t32);
+	*p = tmp0;
 	printk(KERN_INFO "Jique start1\n");
-	tmp0 = (unsigned long)(void*)(&(dev.of_node));
-	tmp1 = (unsigned long)(void*)(&dev);
-	tmp = tmp0-tmp1;
+	tmp1 = (unsigned long)(void*)(&tst.t64);
 	printk(KERN_INFO "finished computing, %lu, %lu\n",tmp0,tmp1);
-	printk(KERN_INFO "%ld\n", tmp);
 	return 0;
 	
 }

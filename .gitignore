@@ -1,2 +1,10 @@
+doc.tex
 main.cc.bak
-__pycache__ 
+__pycache__
+__pycache__/*
+test_msm/*
+!test_msm/Makefile
+!test_msm/test_mod.c
+test_vanilla/*
+!test_vanilla/Makefile
+!test_vanilla/test_mod.c

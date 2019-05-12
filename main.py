@@ -21,20 +21,22 @@ def static_vars(**kwargs):
         return func
     return inner_func
 
-class FuncList:
-    def __init__(self,FuncTar,FuncTarSubs):
+class FuncRange:
+    def __init__(self,FuncTar,subflags):
         self.FuncTar = FuncTar
-        self.FuncTarSubs = FuncTarSubs
+        self.SubFlags = subflags 
 
 def anal_tar_func(r2, r2_id, funclist):
     FuncTar = funclist.FuncTar
-    FuncTarSubs = funclist.FuncTarSubs
+    FuncTarSubs = funclist.SubFlags
     print("analyzing target function in {}...".format(r2_id))
     ret = r2.cmd("fs symbols;f~"+FuncTar).strip()
     if len(ret)<=2:
         print(r2_id+" doesn't have function "+FuncTar)
         exit();
     r2.cmd("af @ {}".format(FuncTar))
+    if FuncTarSubs == None:
+        return
     for rgs in FuncTarSubs:
         for item in rgs:
             ret = r2.cmd("fs symbols;f~"+item).strip()
@@ -43,18 +45,55 @@ def anal_tar_func(r2, r2_id, funclist):
                 exit();
             r2.cmd("af @ {}".format(item))
 
+def strip_head_tail(ret, head, tail):
+    ret = ret[head:]
+    if tail>0:
+        ret = ret[:tail]
+    return ret
 
-def get_search_range_i2c_0(r2, r2_id,funclist):
+#=================================================================
+
+Range_str = "e search.in=raw; e search.from={}; e search.to={};"
+
+def r2search(r2, rg, search_cmd, proc=lambda ret: [i for j in ret for i in j]):
+    if isinstance(rg[0],int):
+        rg = [rg]
+    ret = []
+    for item in rg:
+        rg_str = Range_str.format(item[0],item[1])
+        res = r2.cmd(rg_str+search_cmd).strip()
+        ret.append(res)
+    if len(ret)>0:
+        return proc(ret)
+    return None
+
+def search_esil(r2, rg, esil_search, proc = lambda x:x):
+    print("searching for instructions...")
+    esil_str = "/cej "+esil_search
+    
+    ret = r2search(r2, rg, esil_str, proc=lambda x:x)
+    if len(ret[0])<=2:
+        print("no esil str found, esil: {}".format(esil_str))
+        exit()
+    res = json.loads(ret[0])
+
+    ret = [proc(x) for x in res]
+    return ret
+
+def get_search_range(r2, r2_id, funclist):
     FuncTar = funclist.FuncTar
-    FuncTarSubs = funclist.FuncTarSubs
     print("searching for xrefs in {}...".format(r2_id))
     ret = []
     ret = r2.cmd("afij {}".format(FuncTar)).strip()
     ret = json.loads(ret)
     start = ret[0]["offset"]
     end = ret[0]["offset"]+ret[0]["size"]
+    return start,end
 
-    range_str="e search.in=raw; e search.from={}; e search.to={};".format(start,end)
+def get_search_range_i2c_0(r2, r2_id,funclist):
+    start,end = get_search_range(r2,r2_id,funclist)
+    FuncTarSubs = funclist.SubFlags
+    range_str= Range_str.format(start,end)
     esil_str = lambda s : range_str+"/cej pc,lr,=,{},pc,=".format(s)
     
     fret = []
@@ -74,59 +113,25 @@ def get_search_range_i2c_0(r2, r2_id,funclist):
             ret = json.loads(ret)
             tar_addr.append(ret[0]['offset'])
         fret.append(tuple(tar_addr))
-    return fret
-
-
-def search_esil(r2, rg, strhead = 0, strtail = 0):
-    print("searching for instructions...")
-    range_str="e search.in=raw;e search.from={};e search.to={};".format(rg[0],rg[1])
-    esil_search = "r4,+,0xffffffff,&,=[4]"
-    esil_str = range_str+"/cej "+esil_search # str assignment to first local var. r4 not guaranteed
-    
-    ret = r2.cmd(esil_str).strip()
-    if len(ret)<=2:
-        print("no esil str found, esil: {}".format(esil_str))
-        exit()
-    res = json.loads(ret)
-    regex_expr = "0x[0-9a-fA-F]{1,2}"
-
-    ret = []
-    for item in res:
-        code = item['code']
-        tmp = int(code.split(',')[1],16)
-        #extract = code[:-len(esil_search)+1]
-        #found = re.search(regex_expr, extract)
-        #if found==None:
-        #    print("esil invalid, extract: {}".format(extract))
-        #    exit()
-        #found = found.group(0)
-        
-        #ret.append(int(found,16))
-        ret.append(tmp)
-
-    ret.sort()
-    ret = ret[strhead:]
-    if strtail > 0 :
-        ret = ret[:-strtail]
-    return ret
+    return (start,end), fret
 
 def get_search_range_device_resume(r2, r2_id, funclist):
-    FuncTar = funclist.FuncTar
-    print("searching for xrefs in {}...".format(r2_id))
-    ret = r2.cmd("afij {}".format(FuncTar)).strip()
-    ret = json.loads(ret)
-    start = ret[0]["offset"]
-    end = ret[0]["offset"]+ret[0]["size"]
-    return (start,end)
+    return get_search_range(r2,r2_id,funclist)
 
 def get_search_range_device_initialize(r2, r2_id, funclist):
-    FuncTar = funclist.FuncTar
-    print("searching for xrefs in {}...".format(r2_id))
-    ret = r2.cmd("afij {}".format(FuncTar)).strip()
+    start,end = get_search_range(r2,r2_id,funclist)
+    
+    ret = r2.cmd("afbj @ {}".format(funclist.FuncTar))
     ret = json.loads(ret)
-    start = ret[0]["offset"]
-    end = ret[0]["offset"]+ret[0]["size"]
-    return (start,end)
+    fret = []
+    for item in ret:
+        sub_start = item["addr"]
+        sub_size = item["size"]
+        fret.append(tuple((sub_start, sub_start+sub_size)))
+    if not fret[0][0] == start:
+        fret[0],fret[1] = fret[1], fret[0]
+
+    return (start,end),fret
 
 def set_flag_at(r2, bit, val=1):
     cur = r2.cmd("aer cpsr").strip()
@@ -138,40 +143,46 @@ def set_flag_at(r2, bit, val=1):
         v = v&~mask
     r2.cmd("aer cpsr=0x{:x}".format(v))
     
-def esil_exec_all_branch(r2, rg ):
-    r2.cmd("s {}".format(rg[0]))
-    range_str="e search.in=raw;e search.from={};e search.to={};".format(rg[0],rg[1])
+
+def esil_exec_all_branch(r2, rg, starting_addr ):
+    r2.cmd("s {}".format(starting_addr))
+    #range_str=Range_str.format(rg[0],rg[1])
     Magic = "0x001DDDD"
     Garbage = "0x00100EE"
     ZF = 30
     
+    lmbd = lambda ret: json.dumps([t for x in ret for t in json.loads(x or "[]")])
     print("scanning target analysis addresses...")
-    branchs_json = r2.cmd(range_str+"/cej ,pc,=,}").strip()
-    skips_json = r2.cmd(range_str+"/cej pc,lr,=").strip()
-    target_str_json = r2.cmd(range_str+"/cj str").strip()
-    target_ldr_json = r2.cmd(range_str+"/cj ldr").strip()
-    branchs = []
-    skips = []
+    branchs_json = r2search(r2, rg, "/cej ,pc,=,}",proc=lmbd) or "[]"
+    skips_json = r2search(r2, rg, "/cej pc,lr,=",proc=lmbd) or "[]"
+    target_str_json = r2search(r2, rg, "/cj str",proc=lmbd) or "[]"
+    target_ldr_json = r2search(r2, rg, "/cj ldr",proc=lmbd) or "[]"
+    
+    #branchs_json = r2.cmd(range_str+"/cej ,pc,=,}").strip()
+    #skips_json = r2.cmd(range_str+"/cej pc,lr,=").strip()
+    #target_str_json = r2.cmd(range_str+"/cj str").strip()
+    #target_ldr_json = r2.cmd(range_str+"/cj ldr").strip()
     addrs = {}
     offsets_head = {}
-    #branch_choices_list = {}
     reg_pattern = re.compile('(r\d{1,2})')
-    for item in json.loads(branchs_json):
-        branchs.append(item['offset'])
-        #branch_choices_list[item['offset']] = [1,0]
-    for item in json.loads(skips_json):
-        skips.append(item['offset'])
+
+    branchs = [item['offset'] for item in json.loads(branchs_json)]
+    skips = [item['offset'] for item in json.loads(skips_json)]
     for item in json.loads(target_str_json):
         offset = item['offset']
         string = item['code']
         reses = re.findall(reg_pattern, string)
         offset_head_str = string.split(',')[-1].strip()
+        # TODO: properly deal with write back
+        if offset_head_str[-1]=='!':
+            offset_head_str = offset_head_str[0:-1]
         if offset_head_str[-1]==']':
             offset_head_str = offset_head_str[0:-1]
         offset_head = int(offset_head_str,16)
         if len(reses)<2:
             print("Error: not enough regs in str instr at 0x{:x}".format(offset))
-            exit()
+            reses.append("pc")
+            #exit()
         addrs[offset] = reses # str r0, [r1]: store r0 into place of r1
         offsets_head[offset] = offset_head
     for item in json.loads(target_ldr_json):
@@ -179,12 +190,16 @@ def esil_exec_all_branch(r2, rg ):
         string = item['code']
         reses = re.findall(reg_pattern, string)
         offset_head_str = string.split(',')[-1].strip()
+        # TODO: properly deal with write back
+        if offset_head_str[-1]=='!':
+            offset_head_str = offset_head_str[0:-1]
         if offset_head_str[-1]==']':
             offset_head_str = offset_head_str[0:-1]
         offset_head = int(offset_head_str,16)
         if len(reses)<2:
             print("Error: not enough regs in ldr instr at 0x{:x}".format(offset))
-            exit()
+            reses.append("pc")
+            #exit()
         addrs[offset] = reses # ldr r0, [r1]: load content of r1 into r0
         offsets_head[offset] = offset_head
 
@@ -197,7 +212,8 @@ def esil_exec_all_branch(r2, rg ):
     for item in addrs.keys():
         merged_list[item] = 2
 
-    endpoint_json = r2.cmd(range_str+"/cej sp,+=").strip()
+    endpoint_json = r2search(r2, rg, "/cej sp,+=", proc=lambda x:x[0])
+    #endpoint_json = r2.cmd(range_str+"/cej sp,+=").strip()
     endpoint = json.loads(endpoint_json)[0]['offset']
     merged_list[endpoint] = 3
     # debug print merged_list
@@ -330,8 +346,8 @@ def esil_exec_all_branch(r2, rg ):
 def process_i2c_new_device(r2,r2_id, struct):
     print ("processing i2c_new_device...")
     ls = ['platform_data','bus','type','of_node','parent']
-    FuncTar = "sym.i2c_new_device"
-    FuncTarSubs = [
+    tarfunc = "sym.i2c_new_device"
+    tarfuncsubs = [
                 [
                     "sym.i2c_check_addr_busy",
                     "sym.dev_set_name"
@@ -341,63 +357,117 @@ def process_i2c_new_device(r2,r2_id, struct):
                     "sym.strlcpy"
                 ]
             ]
-    funclist = FuncList(FuncTar,FuncTarSubs)
+    funclist = FuncRange(tarfunc,tarfuncsubs)
     anal_tar_func(r2,r2_id,funclist)
-    rg = get_search_range_i2c_0(r2,r2_id,funclist)
+    _,rg = get_search_range_i2c_0(r2,r2_id,funclist)
+
+    esil_search = "r4,+,0xffffffff,&,=[4]"
+    reg_proc = lambda item: int(item['code'].split(',')[1],16)
     ret = []
-    ret=ret+ search_esil(r2,rg[0]) 
+    ret=ret+ search_esil(r2,rg[0],esil_search, proc=reg_proc) 
+    ret.sort()
     print(ret)
-    ret=ret+ search_esil(r2,rg[1],strtail=1,strhead=1) 
+    ret_tmp= search_esil(r2,rg[1],esil_search, proc=reg_proc) 
+    ret_tmp.sort()
+    ret_tmp = strip_head_tail(ret_tmp,1,1)
+    ret = ret+ret_tmp
     print(ret)
+    branch_search = ",pc,=,}"
+    br_count = search_esil(r2,rg[1],branch_search)
+    if len(ret)==6 or len(br_count)>=2:
+        ls.append('archdata')
     ret.sort()
     ret = [x-0x20 for x in ret] # due to i2c_client offset
     prt_ret = [hex(x) for x in ret]
-    print("Found matches: {}".format(prt_ret))
+    print("Found matches: {}, mapping to {}".format(prt_ret,ls))
     return struct.map_list(ret, ls)
 
 
 def process_device_resume(r2, r2_id, struct):
     print ("processing device_resume...")
     ls = ['power.is_prepared','pm_domain','type','class','bus','driver','mutex']
-    FuncTar = "sym.device_resume"
-    FuncTarSubs = []
-    funclist = FuncList(FuncTar,FuncTarSubs)
+    tarfunc = "sym.device_resume"
+    funclist = FuncRange(tarfunc,None)
     anal_tar_func(r2,r2_id,funclist)
     rg = get_search_range_device_resume(r2,r2_id,funclist)
-    iters = esil_exec_all_branch(r2,rg)
+    
+    iters = esil_exec_all_branch(r2,rg,rg[0])
     ret = iters("r0")
     while ret[0]==False:
         ret = iters("r0")
     ret = ret[1]
     ret.sort()
     prt_ret = [hex(x) for x in ret]
-    print("Found matches: {}".format(prt_ret))
+    print("Found matches: {}, mapping to {}".format(prt_ret,ls))
     return struct.map_list(ret,ls)
+
+
+# detect __raw_spin_lock_init => CONFIG_DEBUG_SPINLOCK
+# detect leaf function => CONFIG_PM_SLEEP not set!!!!
 
 def process_device_initialize(r2, r2_id, struct):
     print("processing device_initialize...")
-    ls = []
-    FuncTar = "sym.device_initialize"
-    FuncTarSubs = []
-    funclist = FuncList(FuncTar,FuncTarSubs)
+    ls = ["devres_head", "dma_pools","kobj"]
+    tarfunc = "sym.device_initialize"
+    funclist = FuncRange(tarfunc,None)
     anal_tar_func(r2,r2_id,funclist)
-    rg = get_search_range_device_initialize(r2,r2_id,funclist)
+    rg, rgs = get_search_range_device_initialize(r2,r2_id,funclist)
+
+    # hard coded part option recover. needs refactoring later
+    refs = [hex(x["to"]) for x in json.loads(r2.cmd("s "+tarfunc+"; afxj").strip()) if x["type"]=="call"] # get all func calls
+    ref_funcs = [r2.cmd("?w "+ref).strip().split(' ')[1].strip() for ref in refs]
+
+#    struct = Struct_vanilla
+#    if r2_id=="msm":
+#        struct = Struct_msm
+
+#    if "sym.complete_all" in ref_funcs:
+#        struct.oplist.set_option("CONFIG_PM_SLEEP")
+#    else:
+#        struct.oplist.set_option("CONFIG_PM_SLEEP",False)
+
+#    res = r2.cmd("fs symbols;f~sym.pm_runtime_init").strip()
+#    if len(res)<2:
+#        struct.oplist.set_option("CONFIG_PM_RUNTIME",False)
+#    else:
+#        struct.oplist.set_option("CONFIG_PM_RUNTIME")
+
+    # hard code part end. only deal with first part of the code no matter what.
+
     ret = []
+    iters = esil_exec_all_branch(r2,rgs,rg[0])
+    ret = iters("r0")
+    print(ret)
+    ret = ret[1]
+    ret.sort()
+
+    # remove devres_lock: it's position is fixed anyway
+    devres_lock = None
+    for item in ret:
+        if item+4 in ret and item-4 in ret:
+            devres_lock = item-4
+            break
+    if devres_lock != None:
+        ret.remove(devres_lock)
+
+    ret = [x for x in ret if x-4 not in ret]
+
+    prt_ret = [hex(x) for x in ret]
+    print("Found matches: {}, mapping to {}".format(prt_ret,ls))
     return struct.map_list(ret,ls)
 
+
 def process():
-    msm_res = process_i2c_new_device(Msm_r2, "msm", Struct_msm)
-    van_res = process_i2c_new_device(Van_r2, "vanilla",Struct_vanilla)
-    print("=================================================")
-    if msm_res == False or van_res == False:
-        print("Offset processing failed. Exiting...")
-        exit()
-    msm_res = process_device_resume(Msm_r2, "msm", Struct_msm)
-    van_res = process_device_resume(Van_r2, "vanilla",Struct_vanilla)
-    print("=================================================")
-    if msm_res == False or van_res == False:
-        print("Offset processing failed. Exiting...")
-        exit()
+    def run_comp(func):
+        msm_res = func(Msm_r2, "msm", Struct_msm)
+        van_res = func(Van_r2, "vanilla",Struct_vanilla)
+        print("=================================================")
+        if msm_res == False or van_res == False:
+            print("Offset processing failed. Exiting...")
+            exit()
+    run_comp(process_i2c_new_device)
+    run_comp(process_device_resume)
+    run_comp(process_device_initialize)
 
     # the actual comparing
     Struct_msm.cmp(Struct_vanilla)
