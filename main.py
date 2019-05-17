@@ -106,10 +106,18 @@ def get_search_range_i2c_0(r2, r2_id,funclist):
                 exit()
             ret = json.loads(ret)
             
-            ret = r2.cmd(esil_str(ret[0]['offset'])).strip()
+            f_esil_str = esil_str(ret[0]['offset'])
+            ret = r2.cmd(f_esil_str).strip()
             if len(ret)<=2:
-                print("no esil found, esil: {}".format(esil_str(off)))
-                exit()
+                if (item == "sym.kmem_cache_alloc"):
+                    r2.cmd("af @ sym.kmem_cache_alloc_trace")
+                    ret = r2.cmd("afij sym.kmem_cache_alloc_trace").strip()
+                    ret = json.loads(ret)
+                    f_esil_str = esil_str(ret[0]['offset'])
+                    ret = r2.cmd(f_esil_str).strip()
+                    if len(ret)<=2:
+                        print("no esil found, esil: {}".format(f_esil_str))
+                        exit()
             ret = json.loads(ret)
             tar_addr.append(ret[0]['offset'])
         fret.append(tuple(tar_addr))
@@ -212,10 +220,6 @@ def esil_exec_all_branch(r2, rg, starting_addr ):
     for item in addrs.keys():
         merged_list[item] = 2
 
-    endpoint_json = r2search(r2, rg, "/cej sp,+=", proc=lambda x:x[0])
-    #endpoint_json = r2.cmd(range_str+"/cej sp,+=").strip()
-    endpoint = json.loads(endpoint_json)[0]['offset']
-    merged_list[endpoint] = 3
     # debug print merged_list
     #for item in merged_list.keys():
     #    print("0x{:x}:{}, ".format(item, merged_list[item]), end='')
@@ -241,6 +245,12 @@ def esil_exec_all_branch(r2, rg, starting_addr ):
     Basicblock.generate_map()
     print("generate map done")
     #Basicblock.print_map()
+
+    #endpoint_json = r2search(r2, rg, "/cej sp,+=", proc=lambda x:x[0])
+    #endpoint = json.loads(endpoint_json)[0]['offset']
+    endpoints = Basicblock.get_all_ends()
+    for item in endpoints:
+        merged_list[item] = 3
 
     def init_env(tar_reg):
         Basicblock.init()
@@ -379,7 +389,6 @@ def process_i2c_new_device(r2,r2_id, struct):
     ret.sort()
     ret = [x-0x20 for x in ret] # due to i2c_client offset
     prt_ret = [hex(x) for x in ret]
-    print("Found matches: {}, mapping to {}".format(prt_ret,ls))
     return struct.map_list(ret, ls)
 
 
@@ -398,7 +407,6 @@ def process_device_resume(r2, r2_id, struct):
     ret = ret[1]
     ret.sort()
     prt_ret = [hex(x) for x in ret]
-    print("Found matches: {}, mapping to {}".format(prt_ret,ls))
     return struct.map_list(ret,ls)
 
 
@@ -407,7 +415,7 @@ def process_device_resume(r2, r2_id, struct):
 
 def process_device_initialize(r2, r2_id, struct):
     print("processing device_initialize...")
-    ls = ["devres_head", "dma_pools","kobj"]
+    ls = ["devres_head.next","devres_head.prev", "dma_pools.next","dma_pools.prev","kobj"]
     tarfunc = "sym.device_initialize"
     funclist = FuncRange(tarfunc,None)
     anal_tar_func(r2,r2_id,funclist)
@@ -417,44 +425,43 @@ def process_device_initialize(r2, r2_id, struct):
     refs = [hex(x["to"]) for x in json.loads(r2.cmd("s "+tarfunc+"; afxj").strip()) if x["type"]=="call"] # get all func calls
     ref_funcs = [r2.cmd("?w "+ref).strip().split(' ')[1].strip() for ref in refs]
 
-#    struct = Struct_vanilla
-#    if r2_id=="msm":
-#        struct = Struct_msm
+    if "sym.complete_all" in ref_funcs:
+        struct.oplist.set_option("CONFIG_PM_SLEEP")
+        ls+= ['power.entry.next','power.entry.prev','power.completion','power.is_prepared','power.power_state','power.wakeup']
+    else:
+        struct.oplist.set_option("CONFIG_PM_SLEEP",False)
 
-#    if "sym.complete_all" in ref_funcs:
-#        struct.oplist.set_option("CONFIG_PM_SLEEP")
-#    else:
-#        struct.oplist.set_option("CONFIG_PM_SLEEP",False)
+    if "sym.__raw_spin_lock_init" in ref_funcs:
+        struct.oplist.set_option("CONFIG_DEBUG_SPINLOCK")
+    else:
+        struct.oplist.set_option("CONFIG_DEBUG_SPINLOCK",False)
 
-#    res = r2.cmd("fs symbols;f~sym.pm_runtime_init").strip()
-#    if len(res)<2:
-#        struct.oplist.set_option("CONFIG_PM_RUNTIME",False)
-#    else:
-#        struct.oplist.set_option("CONFIG_PM_RUNTIME")
+    res = r2.cmd("fs symbols;f~sym.pm_runtime_init").strip()
+    if len(res)<2:
+        struct.oplist.set_option("CONFIG_PM_RUNTIME",False)
+    else:
+        struct.oplist.set_option("CONFIG_PM_RUNTIME")
 
     # hard code part end. only deal with first part of the code no matter what.
 
     ret = []
     iters = esil_exec_all_branch(r2,rgs,rg[0])
     ret = iters("r0")
-    print(ret)
+    print([hex(x) for x in ret[1]])
     ret = ret[1]
     ret.sort()
 
-    # remove devres_lock: it's position is fixed anyway
-    devres_lock = None
-    for item in ret:
-        if item+4 in ret and item-4 in ret:
-            devres_lock = item-4
-            break
-    if devres_lock != None:
-        ret.remove(devres_lock)
-
-    ret = [x for x in ret if x-4 not in ret]
+    if len(ret)-len(ls)==2:
+        ls+=['devres_lock.rlock.raw_lock', 'power.lock.rlock.raw_lock']
+    if len(ret)-len(ls)==1:
+        ls+=['devres_lock.rlock.raw_lock']
 
     prt_ret = [hex(x) for x in ret]
-    print("Found matches: {}, mapping to {}".format(prt_ret,ls))
-    return struct.map_list(ret,ls)
+    ans = struct.map_list(ret,ls)
+    if struct.getOffset("devres_lock")!=-1 and struct.getOffset("devres_lock")-struct.getOffset("devres_head.next")==4:
+        struct.oplist.set_option("CONFIG_GENERIC_LOCKBREAK",False)
+        struct.oplist.set_option("CONFIG_DEBUG_LOCK_ALLOC",False)
+    return ans
 
 
 def process():

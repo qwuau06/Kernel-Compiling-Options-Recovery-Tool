@@ -3,6 +3,8 @@
 #include <linux/fs.h>
 #include <linux/device.h>
 #include <linux/types.h>
+#include <linux/list.h>
+#include <linux/spinlock.h>
 
 #include <asm/uaccess.h>
 
@@ -59,16 +61,16 @@ static int device_release(struct inode* inode, struct file * fp){
 }
 
 static ssize_t device_read(struct file* fp, char * buf, size_t rlength, loff_t *offset){
-	struct test_struct tst;
+	struct device tst;
 	unsigned long tmp0,tmp1;
-	long* p;
-	p = 42;
-	printk(KERN_INFO "Jique start0\n");
-	tmp0 = (unsigned long)(void*)(&tst.t32);
+	long* p, * q, *r;
+	p = 0x42;
+	q = 0x24;
+	r = 0x72;
+	tmp0 = (unsigned long)((void*)&tst.power.completion.wait.lock-(void*)&tst);
 	*p = tmp0;
-	printk(KERN_INFO "Jique start1\n");
-	tmp1 = (unsigned long)(void*)(&tst.t64);
-	printk(KERN_INFO "finished computing, %lu, %lu\n",tmp0,tmp1);
+	tmp1 = (unsigned long)((void*)&tst.power.completion.wait.task_list-(void*)&tst);
+	*q = tmp1;
 	return 0;
 	
 }

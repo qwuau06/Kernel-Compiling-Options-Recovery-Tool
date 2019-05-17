@@ -40,6 +40,13 @@ class Basicblock:
         self.parent_list = []
         self.visited = False
 
+    def get_all_ends():
+        ret = []
+        for bb in Basicblock.bb_list.values():
+            if bb.endblock:
+                ret.append(bb.end)
+        return ret
+
     def traversed():
         #flag=False
         for item in Basicblock.bb_list.values():
