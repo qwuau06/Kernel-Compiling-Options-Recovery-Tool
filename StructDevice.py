@@ -223,7 +223,7 @@ class StructDevice:
         for idx, item in enumerate(StructDevice.Members):
             StructDevice.Revmap[item] = idx
         print("initialization done.")
-        print(StructDevice.Members)
+        #print(StructDevice.Members)
 
     def getIndex(member):
         try:
@@ -317,10 +317,11 @@ class StructDevice:
                 continue
 
             # both have a member but with different offsets
+            # Logic: the difference will remain constant if no new diff is introduced, save for padding issues which can be resolved.
             new_diff = a-b
             if diff!=new_diff:
-                diff, new_diff = new_diff, new_diff-diff
-                if new_diff<0:
+                diff, true_diff = new_diff, new_diff-diff
+                if true_diff<0:
                     missing = self.name
                 else:
                     missing = another.name
@@ -330,9 +331,10 @@ class StructDevice:
                 print("possible missing members in {} kernel, between {} and {}, offsets: {}, {}.".format(
                     missing, StructDevice.Members[last_idx], StructDevice.Members[idx],hex(a),hex(b)))
                 lastmem = item
-                Diff(new_diff,tuple((StructDevice.Members[last_idx], StructDevice.Members[idx])),oplist = self.oplist)
+                Diff(true_diff,tuple((StructDevice.Members[last_idx], StructDevice.Members[idx])),oplist = self.oplist)
             else:
-                print("member registered in both kernel: {}, offset {}, {}.".format(StructDevice.Members[idx],hex(a), hex(b)))
+                #print("member registered in both kernel: {}, offset {}, {}.".format(StructDevice.Members[idx],hex(a), hex(b)))
+                None
         self.oplist.analyze_between(another)
 
     def map_list(self,offs, mems):
@@ -355,7 +357,7 @@ class OptionList:
     # class of a single option
     class Op:
         Cfg = "CONFIG_"
-        Verbose = False
+        Verbose = True
         class Effect:
             def __init__(self, opname, extrabytes, extramems, deps, antimems,tradable):
                 self.opname = opname
@@ -374,6 +376,7 @@ class OptionList:
                 ret+= "  antimems:{}\n".format(self.antimems)
                 children = [x.name for x in self.children]
                 ret+= "  children:{}\n".format(children)
+                ret+= "  tradable:{}\n".format(self.tradable)
                 return ret
 
         def __init__(self, struct, name, bound, extrab, extram, deps=[], antimems = [],tradable = [] ):
@@ -414,7 +417,7 @@ class OptionList:
             self.effects[tuple((bound))] = OptionList.Op.Effect(name, extrab, extram, deps, antimems,tradable)
 
         def __repr__(self):
-            ret = "\n\n{}:".format(self.name)
+            ret = "\n\n{}:\n".format(self.name)
             if OptionList.Op.Verbose:
                 for rg,eff in self.effects.items():
                     ret+=" {}:".format(rg)
@@ -429,7 +432,7 @@ class OptionList:
             for effbd,eff in self.effects.items():
                 if StructDevice.range_in_range(effbd, bounds):
                     return eff
-            #print("Error: Didn't find {} with in {}.".format(bounds, self.name))
+            print("Error: Didn't find {} with in {}.".format(bounds, self.name))
             return None
 
     # ugly options initialization
@@ -441,7 +444,7 @@ class OptionList:
         OptionList.Op(self, "SMP", ["mutex.wait_list","mutex.__end_mutex__"], 4, ["mutex.owner"], tradable = ['DEBUG_MUTEXES'])
         OptionList.Op(self, "DEBUG_MUTEXES", ["mutex.wait_list", "mutex.__end_mutex__"], 12, ["mutex.owner","mutex.name","mutex.magic"])
 
-        OptionList.Op(self, "PM_SLEEP", ["power.entry","power.should_wakeup"], 28-4, 
+        OptionList.Op(self, "PM_SLEEP", ["power.entry","power.should_wakeup"], 24,
                 ["power.entry","power.completion","power.wakeup","power.wakeup_path"], antimems=["power.should_wakeup"])
 
         subs = StructDevice.Members[ StructDevice.Members.index("power.suspend_timer"): StructDevice.Members.index("power.pq_req")+1 ] 
@@ -529,12 +532,13 @@ class OptionList:
     # case 3: more than one option and cannot decide: powerset over all possibilities, calc offset for each. find the most relateable one
 
     def analyze_between(self, another):
+        anls = AnswerList(self.name, another.name)
         another = another.oplist
-        diff_list = Diff.diff_list
         Diff.pos_oplist = self
         Diff.neg_oplist = another
+
         print("=================================================")
-        print("Diff list: {}".format(len(diff_list)))
+        print("Diff list: {}".format(len(Diff.diff_list)))
 
         Diff.update_diffs()
 
@@ -543,11 +547,20 @@ class OptionList:
         b_list = another.ops
         print("Start analysis...")
         ret = []
-        diff_assert = lambda x:ret.append("Detected difference [{}, {}], size {}.".format(x.bounds[0],x.bounds[1],x.diff))
-        must_op_str = lambda x,who:ret.append("{}: {} True.".format(who.name,x.name))
-        poss_op_str = lambda x,who:ret.append("{}: {} Potentially True.".format(who,x))
-        none_op_str = lambda x,who:ret.append("{}: {} False.".format(who.name,x.name))
-        unkn_op_str = lambda x:ret.append("Unknown Option between {} and {}, size {}.".format(x.bounds[0],x.bounds[1],x.diff))
+
+        def must_op_str(x,who): anls.oplist[who.name][x.name] = True
+        def none_op_str(x,who): anls.oplist[who.name][x.name] = False
+        def unkn_op_str(x): anls.unknown[tuple(x.bound)] = x.diff
+
+        # func factory for case specific options
+        def case_fac():
+            case = AnswerList.Case(anls)
+            def unkn_op_str(x): case.unknown[tuple(x.bound)] = x.diff
+            def poss_op_str(x,who): case.oplist[who].append(x)
+            def add_details(d): case.details = d
+            def set_diff(d): case.diff = d
+            def set_diff_str(d): case.diff_str = d 
+            return unkn_op_str, poss_op_str, add_details, set_diff, set_diff_str
 
         # Round 1: remove known options:
         for op in a_list:
@@ -565,8 +578,7 @@ class OptionList:
         Diff.update_diffs()
 
         # Round 2: no options. If there's a difference then it is an unknown tag
-        for diff in diff_list:
-            diff_assert(diff)
+        for diff in Diff.diff_list:
             if len(diff.oplist)==0: # no options
                 unkn_op_str(diff)
         # Round 3: only has one option and size matches:
@@ -636,45 +648,55 @@ class OptionList:
         print(Diff.diff_list)
                 
         print("first round eradication done.")
-        print("dry list a len:{}".format(len(a_list)))
-        print("dry list b len:{}".format(len(b_list)))
-        print("dep list a len:{}".format(len(a_dep_list)))
-        print("dep list b len:{}".format(len(b_dep_list)))
-        print("dry list a:{}".format( [x.name for x in a_list] ))
-        print("dry list b:{}".format( [x.name for x in b_list] ))
+        print("dep list {}:{}".format( self.name, [x.name for x in a_dep_list] ))
+        print("dry list {}:{}".format( another.name, [x.name for x in a_list] ))
+        print("dep list {}:{}".format( self.name, [x.name for x in b_dep_list] ))
+        print("dry list {}:{}".format( another.name, [x.name for x in b_list] ))
 
         # making the powerset
         a_perms = list(powerset(a_list))
         b_perms = list(powerset(b_list))
+        perms = []
+
+        def filter_perms(perms, x_deps, oplist):
+            ret = []
+            for perm in perms:
+                flag = True
+                # for each member, if it has dependencies and none of dependencies show up in the case, remove it
+                for op in perm:
+                    for eff in op.effects.values():
+                        if len(eff.deps) == 0:
+                            break 
+                        par_flag = False
+                        for par in eff.deps:
+                            if oplist.get_option(par) in x_deps:
+                                par_flag = True
+                                break
+                            if oplist.get_option(par) in perm:
+                                par_flag = True
+                                break
+                        if not par_flag:
+                            flag = False
+                            break
+                if flag:
+                    ret.append(perm)
+            return ret
+
+        a_perms = filter_perms(a_perms, a_dep_list, Diff.pos_oplist)
+        b_perms = filter_perms(b_perms, b_dep_list, Diff.neg_oplist)
 #        for y in a_perms:
 #            print([x.name for x in y])
 #        for y in b_perms:
 #            print([x.name for x in y])
-        perms = []
-#        for perms in [a_perms, b_perms]:
-#            for perm in perms:
-#                flag = True
-#                # for each member, if it has dependencies and none of dependencies show up in the case, it isn't practical then
-#                for op in perm:
-#                    if (len(item.parents)>0 and
-#                    len(list(set(item.parents).intersection(perm)))==0 and
-#                    len(list(set(item.parents).intersection(dep_list)))==0):
-#                        flag = False
-#                if flag:
-#                    perms.append(perm)
+
         for a in a_perms:
             for b in b_perms:
-                list1= [x.name for x in a]
+                list1 = [x.name for x in a]
                 list2 = [x.name for x in b]
                 if len(list(set(list1).intersection(list2)))>0:
                     continue
                 perms.append({'a':a, 'b':b})
         print("all permutations: {}.".format(len(perms)))
-
-#        for item in perms:
-#            a_ops = [x.name for x in item['a']]
-#            b_ops = [x.name for x in item['b']]
-#            print("{};{}".format(a_ops,b_ops))
 
         # core code for config permutation
         res_out = {}
@@ -684,39 +706,49 @@ class OptionList:
                 op.suspected = True
                 op.verified = True
                 op.set = True
-            Diff.update_diffs()
+            Diff.update_diffs(True)
+            details = ("Post update:...\n{}".format(Diff.diff_list))
             # add into dict
-            total_diff = 0
-            for diff in diff_list:
-                total_diff += abs(diff.diff-diff.expected)
-            res_out[flattened_perm] = total_diff
-            # clean up
+            total_diff = 0 
+            diff_str = "debug: "
+            for x_diff in Diff.diff_list:
+                total_diff += abs(x_diff.diff-x_diff.expected)
+                diff_str += "{}-{}, ".format(x_diff.diff,x_diff.expected)
+            res_out[flattened_perm] = tuple((total_diff,details,diff_str))
+            # clean up, diff_list will be auto cleaned by next round
             for op in [*perm['a'],*perm['b']]:
                 op.suspected = False
                 op.verified = False
                 op.set = False
-            Diff.update_diffs()
 
-        thres = 100
-        maxcount = 10
+        thres = 999
+#        maxcount = 4
         case = 0
         Diff.diff_list.append(self)
-        for perm, res in sorted(res_out.items(),key=lambda kv:kv[1] ):
-            if res == 0:
-                ret.append("\nExact matching case {}:".format(case))
-            elif res > thres:
+        for perm, res in sorted(res_out.items(),key=lambda kv:kv[1][0] ):
+            unkn_op_str, poss_op_str, add_details, set_diff, set_diff_str = case_fac()
+
+            if res[0] > thres:
                 continue
-            else:
-                ret.append("\nNon-exact matching case {}, total abs diff {}:".format(case,res))
+            elif res[0] != 0 :
+                set_diff(res[0])
+                set_diff_str(res[2])
+#            elif res[0] == 0:
+#                ret.append("\nExact matching case {}:".format(case))
+#            else:
+#                ret.append("\nNon-exact matching case {}, total abs diff {}:".format(case,res[0]))
             for op in perm:
                 names = op.split('.')
                 poss_op_str(names[1],names[0])
+#            ret.append(res[1])
+            add_details(res[1])
             case += 1
-            if case > maxcount:
+            if case > AnswerList.Maxcount:
                 break
 
-        for item in ret:
-            print(item)
+#        for item in ret:
+#            print(item)
+        anls.prt()
         return ret
 
 # Diff between two list of offsets, and corresponding options
@@ -726,18 +758,20 @@ class Diff:
     pos_oplist = None
     neg_oplist  = None
     
-    def __init__(self, diff, bounds, oplist=None):
+    def __init__(self, diff, bounds, oplist=None, fake=False):
         self.diff = diff        # diff
         self.bounds = bounds    # (lower, upper)
         self.oplist = [] # notice it only register the names
         self.expected = 0
         self.get_eff = lambda o: o.get_eff(self.bounds)
         self.get_bytes = lambda o: o.get_eff(self.bounds).bytes if o.get_eff(self.bounds)!=None else -1
+        self.fake = fake
         Diff.diff_list.append(self)
         if oplist:
             for op in oplist.ops:
                 if self.option_in_range(op):
                     self.oplist.append(op.name)
+        print("New Diff creating: diff:{}, bounds:{}, fake={}".format(self.diff,self.bounds,self.fake))
             
                 
     def option_in_range(self, option):
@@ -754,13 +788,14 @@ class Diff:
 
     # update diffs after changes in options.
     # TODO:this function should not depend on struct, but currently doesn't have a better way, unless rewriting it.
-    def update_diffs(): 
+    def update_diffs(fake=False): 
         if Diff.pos_oplist == None or Diff.neg_oplist == None:
             print("please set positive and negetive structs first")
             exit()
         pos_op = Diff.pos_oplist
         neg_op = Diff.neg_oplist
 
+        Diff.diff_list = [df for df in Diff.diff_list if not df.fake]
         for diff in Diff.diff_list:
             diff.expected = 0
         new_list = []
@@ -770,11 +805,14 @@ class Diff:
                 for k,v in op.effects.items():
                     get = lambda x: pos_op.get_option(x)
                     # if dep not satisfied
-                    if len(v.deps)>0 and  len([x for x in v.deps if get(x).verified and get(x).set])==0:
+                    if len(v.deps)>0 and len([x for x in v.deps if get(x).verified and get(x).set])==0:
                         continue
                     # if tradable exists
                     if len(v.tradable)>0 and len([x for x in v.tradable if get(x).verified and get(x).set])>0:
+                        #print("a; op:{}, bound:{}, traded{}".format(op.name, k, v.tradable))
                         continue
+                    elif len(v.tradable)>0:
+                        None
                     new_list+= [tuple((k,v.bytes))]
                 if op.suspected:
                     delete_flag = False
@@ -787,7 +825,10 @@ class Diff:
                         continue
                     # if tradable exists
                     if len(v.tradable)>0 and len([x for x in v.tradable if get(x).verified and get(x).set])>0:
+                        #print("b; op:{}, bound:{}, traded{}".format(op.name, k, v.tradable))
                         continue
+                    elif len(v.tradable)>0:
+                        None
                     new_list+= [tuple((k,-v.bytes))]
                 if op.suspected:
                     delete_flag = False
@@ -795,18 +836,136 @@ class Diff:
             bounds, extrabytes = item[0],item[1]
             flag = False
             for diff in Diff.diff_list:
+                #print("diff bound:{}, option bound:{}".format(diff.bounds, bounds))
                 if StructDevice.range_in_range(bounds, diff.bounds):
                     flag = True
                     diff.expected += extrabytes
             if not flag:
-                Diff(-extrabytes, bounds, pos_op)
-        #print("\nPost update:...")
-        #print(Diff.diff_list)
-        if delete_flag:
-            Diff.diff_list = [x for x in Diff.diff_list if x.diff != x.expected]
+                new_diff_flag = True
+                for diff in Diff.diff_list:
+                    if StructDevice.range_in_range(diff.bounds,bounds):
+                        new_diff_flag = False
+                if new_diff_flag:
+                    Diff(-extrabytes, bounds, pos_op, fake=fake)
+#        if delete_flag:
+#            Diff.diff_list = [x for x in Diff.diff_list if x.diff != x.expected]
 
     def saturated():
         for diff in Diff.diff_list:
             if diff.expected != diff.diff:
                 return False
         return True
+
+# Used for final output. TODO: Support verbose/simplified output
+class AnswerList:
+    # unknown are expressed as tuple(bound):diff
+    class Case:
+        def __init__(self,ls):
+            self.oplist = {ls.a_name:[], ls.b_name:[]}
+            self.unknown = {}
+            self.diff = 0
+            self.diff_str = ""
+            self.details = ""
+            ls.caselist.append(self)
+
+    Threshold = 100
+    Maxcount = 4
+    Verbose = True
+    Deprecated = False
+
+    def __init__(self,a_name,b_name):
+        self.caselist = []
+        self.a_name = a_name
+        self.b_name = b_name
+        self.unknown = {}
+        self.oplist = {self.a_name:{}, self.b_name:{}}
+
+    def prt_case(self, case,count):
+        print("------------------------------------------------------------------------")
+        print("Case {}:".format(count))
+        print("Total diff: {}".format(case.diff))
+        print("------------------------------------------------------------------------")
+        print("               msm                 |               vanilla              ")
+        print("------------------------------------------------------------------------")
+        t_name = self.a_name
+        g_name = self.b_name
+        if self.a_name == "vanilla":
+            t_name = self.b_name
+            g_name = self.a_name
+        msm_list = [idx for idx, x in self.oplist[t_name].items() if x]
+        msm_list2= [idx for idx in case.oplist[t_name]]
+        msm_list = [*msm_list, *msm_list2]
+        van_list = [idx for idx, x in self.oplist[g_name].items() if x]
+        van_list2= [idx for idx in case.oplist[g_name]]
+        van_list = [*van_list, *van_list2]
+        maxc = max( len(msm_list), len(van_list) )
+        for i in range(maxc):
+            a,b = "",""
+            if i< len(msm_list):
+                a = msm_list[i].split("=")[0]
+            if i< len(van_list):
+                b = van_list[i].split("=")[0]
+            print("{:35s}|{:35s}".format(a,b))
+        print("------------------------------------------------------------------------")
+        if len(self.unknown.keys())>0 or len(case.unknown.keys())>0:
+            print("Unknown:")
+            for bound,diff in self.unknown.items():
+                print("{}:{}".format(bound,diff))
+            for bound,diff in case.unknown.items():
+                print("{}:{}".format(bound,diff))
+            print("------------------------------------------------------------------------")
+        if(AnswerList.Verbose):
+            print("Details:")
+            print(case.details)
+            print("------------------------------------------------------------------------")
+        print()
+
+    def prt(self):
+        if AnswerList.Deprecated:
+            must_op_str = lambda x,who:print("{}: {} True.".format(who,x))
+            poss_op_str = lambda x,who:print("{}: {} Potentially True.".format(who,x))
+            none_op_str = lambda x,who:print("{}: {} False.".format(who,x))
+            unkn_op_str = lambda bound,diff:print("Unknown Option between {} and {}, size {}.".format(bounds[0],bounds[1],diff))
+            for item,ans in self.oplist[self.a_name].items():
+                if ans:
+                    must_op_str(item,self.a_name)
+                else:
+                    none_op_str(item,self.a_name)
+            for item,ans in self.oplist[self.b_name].items():
+                if ans:
+                    must_op_str(item,self.b_name)
+                else:
+                    none_op_str(item,self.b_name)
+            for bound, diff in self.unknown.items():
+                unkn_op_str(bound, diff)
+            count = 0
+            for item in self.caselist:
+                if item.diff > AnswerList.Threshold:
+                    continue
+                if item.diff == 0:
+                    print("\nCase {}: Exact Match:".format(count))
+                else:
+                    print("\nCase {}: Non-Exact Match with diff {}:".format(count,item.diff))
+                for x in self.oplist[self.a_name].items():
+                    if ans:
+                        must_op_str(item,self.a_name)
+                for x in item.oplist[self.a_name]:
+                    poss_op_str(self.a_name,x)
+                for x in self.oplist[self.b_name].items():
+                    if ans:
+                        must_op_str(item,self.b_name)
+                for x in item.oplist[self.b_name]:
+                    poss_op_str(self.b_name,x)
+                for bound, diff in item.unknown.items():
+                    unkn_op_str(bound, diff)
+                if(AnswerList.Verbose):
+                    print(item.details)
+                    print(item.diff_str)
+                count+=1
+                if count > AnswerList.Maxcount:
+                    break
+        else:
+            count = 0
+            for case in self.caselist:
+                self.prt_case(case,count)
+                count+=1
