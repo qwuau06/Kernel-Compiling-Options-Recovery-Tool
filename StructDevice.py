@@ -32,6 +32,12 @@ import itertools
 UNDEF = -1
 ERROR = -2
 
+# Debug options for quick testing. Not used outside this file
+DebugAllPermsSep = False
+DebugAllPerms = False
+DebugMembersPrt = False
+
+
 def powerset(iterable):
     s = list(iterable)
     return itertools.chain.from_iterable(itertools.combinations(s, r) for r in range(len(s)+1))
@@ -51,12 +57,14 @@ class StructDevice:
             "platform_data",    # 4
             "power",            # EXPAND
             "pm_domain",        # 4
+            "pins",             # CONFIG_PINCTRL: 4
             "numa_node",        # CONFIG_NUMA: 4 # not applicable
             "dma_mask",         # 4
             "coherent_dma_mask",# 8
             "dma_parms",        # 4
             "dma_pools",        # 8
             "dma_mem",          # 4
+            "cma_area",         # CONFIG_CMA: 4
             "archdata",         # CONFIG_DMABOUNCE: +4; CONFIG_IOMMU_API: +4
             "of_node",          # 4
             "devt",             # 4
@@ -151,8 +159,10 @@ class StructDevice:
             "n_ref"             # 4
             ]
     SubMembers["archdata"] = [
-            "dmabounce",        # 4
-            "iommu",            # 4
+            "dma_ops",          # 4, *msm kernel only
+            "dmabounce",        # CONFIG_DMABOUNCE: 4
+            "iommu",            # CONFIG_IOMMU_API: 4
+            "mapping",          # CONFIG_ARM_DMA_USE_IOMMU: 4, *msm kernel only
             ]
     spinlock_t = [                  #### spinlock_t model
             "rlock.raw_lock",       # CONFIG_DEBUG_SPINLOCK || CONFIG_SMP: 4
@@ -176,16 +186,12 @@ class StructDevice:
     SubMembers["dma_pools"] = listhead_t.copy()
     SubMembers["power.entry"] = listhead_t.copy()
 
-    PaddingList = [
-            "dma_pools",
-            "devres_head",
-            "coherent_dma_mask",
-            "power.lock",
-            "power.completion.wait.task_list",
-            "mutex.wait_list",
-            "power.suspend_time",
-            "kobj.entry"
-            ]
+    # TODO: some members may not present. needs to purge them if not presented
+    PaddingList = { 
+#            "coherent_dma_mask":None,
+#            "power.max_time_suspended_ns":"CONFIG_PM_RUNTIME",
+#            "power.suspend_time":"CONFIG_PM_RUNTIME",
+            }
 
     def range_in_range(a,b):
         ar = [StructDevice.getIndex(a[0]), StructDevice.getIndex(a[1])]
@@ -204,6 +210,12 @@ class StructDevice:
         self.offsets = [UNDEF]*len(StructDevice.Members) # offsets of each member
         self.offsets[0] = 0 # parent is always the first member
         self.oplist = OptionList(name)
+        
+        # msm has an extra member in archdata
+        if name == "msm":
+            self.oplist.set_option("(archdata.dma_ops)",force=True)
+        else:
+            self.oplist.set_option("(archdata.dma_ops)",False,force=True)
 
     def init_members():
         print("initializing member list...")
@@ -223,7 +235,8 @@ class StructDevice:
         for idx, item in enumerate(StructDevice.Members):
             StructDevice.Revmap[item] = idx
         print("initialization done.")
-        #print(StructDevice.Members)
+        if DebugMembersPrt:
+            print(StructDevice.Members)
 
     def getIndex(member):
         try:
@@ -291,15 +304,31 @@ class StructDevice:
             b = another.getOffset(idx)
 
             # deal with padding difference
-            if item in StructDevice.PaddingList:
-                newdiff = diff
-                if diff!=0:
-                    if diff > 0:
-                        newdiff = diff//8*8
-                    elif diff < 0:
-                        newdiff = diff//(-8)*(-8)
-                    diff = newdiff
-                print("Smooth out padding at {}, old diff: {}, new diff: {}.".format(item,diff,newdiff))
+            if item in StructDevice.PaddingList.keys():
+                pad_flag = False
+                if StructDevice.PaddingList[item] == None:
+                    pad_flag = True
+                else:
+                    opname = StructDevice.PaddingList[item]
+                    op_0 = self.oplist.get_option(opname)
+                    op_1 = another.oplist.get_option(opname)
+                    bool_0 = op_0.verified and op_0.set
+                    bool_1 = op_1.verified and op_1.set
+                    if bool_0 or bool_1:
+                        pad_flag = True
+
+                if pad_flag:
+                    newdiff = diff
+                    olddiff = diff
+                    if diff!=0:
+                        if diff > 0:
+                            newdiff = diff//8*8
+                        elif diff < 0:
+                            newdiff = diff//(-8)*(-8)
+                        diff = newdiff
+                    print("Smooth out padding at {}, old diff: {}, new diff: {}.".format(item,olddiff,newdiff))
+                else:
+                    print("Neither side has member {}, skipping padding".format(item))
 
             # both not defined
             if (a == UNDEF and b == UNDEF):
@@ -328,8 +357,8 @@ class StructDevice:
                 last_idx = idx-1
                 while last_idx>=0 and (self.offsets[last_idx]==UNDEF or another.offsets[last_idx]==UNDEF):
                     last_idx = last_idx-1
-                print("possible missing members in {} kernel, between {} and {}, offsets: {}, {}.".format(
-                    missing, StructDevice.Members[last_idx], StructDevice.Members[idx],hex(a),hex(b)))
+                print("possible missing members in {} kernel, between {} and {}, offsets: {}, {}, diff: {}".format(
+                    missing, StructDevice.Members[last_idx], StructDevice.Members[idx],hex(a),hex(b),true_diff))
                 lastmem = item
                 Diff(true_diff,tuple((StructDevice.Members[last_idx], StructDevice.Members[idx])),oplist = self.oplist)
             else:
@@ -339,7 +368,7 @@ class StructDevice:
 
     def map_list(self,offs, mems):
         if len(offs) != len(mems):
-            print("Error: list size mismatch between struct members and returned members")
+            print("Error: list size mismatch between struct members ({}) and returned members ({})".format(len(mems),len(offs)))
             return False
         mems.sort(key=lambda x: StructDevice.getIndex(x))
         offs.sort()
@@ -380,7 +409,8 @@ class OptionList:
                 return ret
 
         def __init__(self, struct, name, bound, extrab, extram, deps=[], antimems = [],tradable = [] ):
-            name = OptionList.Op.Cfg+name
+            if name != "(archdata.dma_ops)":
+                name = OptionList.Op.Cfg+name
             existed = [x for x in struct.ops if x.name == name]
             if len(existed)>0:
                 self = existed[0]
@@ -444,6 +474,10 @@ class OptionList:
         OptionList.Op(self, "SMP", ["mutex.wait_list","mutex.__end_mutex__"], 4, ["mutex.owner"], tradable = ['DEBUG_MUTEXES'])
         OptionList.Op(self, "DEBUG_MUTEXES", ["mutex.wait_list", "mutex.__end_mutex__"], 12, ["mutex.owner","mutex.name","mutex.magic"])
 
+        OptionList.Op(self, "PINCTRL", ["pm_domain","dma_mask"], 4, ["pins"])
+        OptionList.Op(self, "CMA", ["dma_mem","archdata"], 4, ["cma_area"])
+        OptionList.Op(self, "(archdata.dma_ops)", ["archdata","of_node"], 4, ["dma_ops"])
+
         OptionList.Op(self, "PM_SLEEP", ["power.entry","power.should_wakeup"], 24,
                 ["power.entry","power.completion","power.wakeup","power.wakeup_path"], antimems=["power.should_wakeup"])
 
@@ -456,56 +490,56 @@ class OptionList:
         OptionList.Op(self,"TIMER_STATS", ["power.suspend_timer", "power.timer_expires"], 24, [], deps = ["PM_RUNTIME"])
 
         # spinlock_t complications
-        spinlock_subs = ["devres_lock.", "mutex.wait_lock.", "power.lock.", "power.completion.wait.lock."]
+        # lockdep_map: 8+4*(2)  CONFIG_LOCK_STAT:+8
+        # appearance: DEBUG_LOCK_ALLOC: spinlock_t, mutex.dep_map, LOCKDEP: two in power
+        spinlock_subs = ["devres_lock.", "mutex.wait_lock.", "power.lock."]
         extra_spinlocks=[
             ["power.wait_queue", "power.usage_count"]
         ]
         for par in spinlock_subs:
             bound = [par+"rlock.raw_lock", par+"__end_spinlock__"]
+            OptionList.Op(self, "GENERIC_LOCKBREAK", bound, 4, [] )
+            OptionList.Op(self, "DEBUG_SPINLOCK", bound, 16, [])
+            OptionList.Op(self, "SMP", bound, 4, [], tradable = ["DEBUG_SPINLOCK"])
+            OptionList.Op(self, "DEBUG_LOCK_ALLOC", bound, 16, [])
+            OptionList.Op(self, "LOCK_STAT", bound, 8, [], deps = ["DEBUG_LOCK_ALLOC"])
+        bound = ["power.completion.wait.lock.rlock.raw_lock","power.completion.wait.lock.__end_spinlock__"]
+        OptionList.Op(self, "GENERIC_LOCKBREAK", bound, 4, [] ,deps = ["PM_SLEEP"])
+        OptionList.Op(self, "DEBUG_SPINLOCK", bound, 16, [], deps = ["PM_SLEEP"])
+        OptionList.Op(self, "SMP", bound, 4, [], tradable = ["DEBUG_SPINLOCK"], deps = ["PM_SLEEP"])
+        OptionList.Op(self, "DEBUG_LOCK_ALLOC", bound, 16, [], deps = ["PM_SLEEP"])
+        OptionList.Op(self, "LOCK_STAT", bound, 8, [], deps = ["DEBUG_LOCK_ALLOC"])
+        for bound in extra_spinlocks:
             OptionList.Op(self, "GENERIC_LOCKBREAK", bound, 4, [], deps = ["PM_RUNTIME"])
             OptionList.Op(self, "DEBUG_SPINLOCK", bound, 16, [], deps = ["PM_RUNTIME"])
-            OptionList.Op(self, "SMP", bound, 4, [], tradable = ["DEBUG_SPINLOCK"], deps = ["PM_RUNTIME"])
-        for rg in extra_spinlocks:
-            OptionList.Op(self, "GENERIC_LOCKBREAK", rg, 4, [])
-            OptionList.Op(self, "DEBUG_SPINLOCK", rg, 16, [])
-            OptionList.Op(self, "SMP", rg, 4, [])
+            OptionList.Op(self, "SMP", bound, 4, [], deps = ["PM_RUNTIME"])
+            OptionList.Op(self, "DEBUG_LOCK_ALLOC", bound, 16, [], deps = ["PM_RUNTIME"])
+            OptionList.Op(self, "LOCK_STAT", bound, 8, [], deps = ["DEBUG_LOCK_ALLOC"])
+        OptionList.Op(self, "DEBUG_LOCK_ALLOC", ["mutex.magic", "bus"], 16, [])
+        OptionList.Op(self, "LOCK_STAT", ["mutex.magic", "bus"], 8, [], deps = ["DEBUG_LOCK_ALLOC"])
 
-        # lockdep_map: 8+4*(2)  CONFIG_LOCK_STAT:+8
-        # appearance: DEBUG_LOCK_ALLOC: spinlock_t, mutex.dep_map, LOCKDEP: two in power
-
-        # generate list
         lockdeps_LOCKDEP = [
             ["power.suspend_timer", "power.timer_expires"],
             ["power.work", "power.wait_queue"]
         ]
-        lockdeps_DEBUG_LOCK_ALLOC = [
-            ["mutex.magic", "mutex.__end_mutex__"] 
-        ]
-        for parent in spinlock_subs:
-            tmp = [parent+"rlock.owner", parent+"__end_spinlock__"]
-            lockdeps_DEBUG_LOCK_ALLOC.append(tmp)
-        for bound in extra_spinlocks:
-            lockdeps_DEBUG_LOCK_ALLOC.append(bound)
-
+        
         # add lockdep_map ops
         for rg in lockdeps_LOCKDEP:
             OptionList.Op(self, "LOCKDEP", rg, 16, [], deps = ["PM_RUNTIME"])
             OptionList.Op(self, "LOCK_STAT", rg, 8, [], deps = ["LOCKDEP"])
-        for rg in lockdeps_DEBUG_LOCK_ALLOC:
-            OptionList.Op(self, "DEBUG_LOCK_ALLOC", rg, 16, [], deps = ["PM_RUNTIME"])
-            OptionList.Op(self, "LOCK_STAT", rg, 8, [], deps = ["DEBUG_LOCK_ALLOC"])
         # finished adding options
 
         #print(self.ops)
 
-    def set_option(self, opname, val=True, suspected = False):
+    def set_option(self, opname, val=True, suspected = False, force=False):
         if opname not in [o.name for o in self.ops]:
-            print ("Error: non-existing option!")
+            print ("Error: non-existing option {}!".format(opname))
             exit()
         op = self.get_option(opname)
         if op.verified==True and op.set != val:
-            print("Error: conflicting options: {}".format(op))
-            exit()
+            if not force:
+                print("Error: conflicting options: {}".format(opname))
+                exit()
         oldval = op.set
         op.set=val
         op.verified=True
@@ -550,7 +584,7 @@ class OptionList:
 
         def must_op_str(x,who): anls.oplist[who.name][x.name] = True
         def none_op_str(x,who): anls.oplist[who.name][x.name] = False
-        def unkn_op_str(x): anls.unknown[tuple(x.bound)] = x.diff
+        def unkn_op_str(x): anls.unknown[tuple(x.bounds)] = x.diff
 
         # func factory for case specific options
         def case_fac():
@@ -576,12 +610,18 @@ class OptionList:
                 else:
                     none_op_str(op,another)
         Diff.update_diffs()
+        print("Known members in {:7s}:{}".format(self.name,[x.name for x in a_list if x.verified and x.set and not x.suspected])) # sure existing members
+        print("Known members in {:7s}:{}".format(another.name,[x.name for x in b_list if x.verified and x.set and not x.suspected])) # sure existing members
 
-        # Round 2: no options. If there's a difference then it is an unknown tag
+        # Round 2: if diff is larger than a specific value, then a config is confirmed
+        # TODO
+        None
+
+        # Round 3: no options. If there's a difference then it is an unknown tag
         for diff in Diff.diff_list:
             if len(diff.oplist)==0: # no options
                 unkn_op_str(diff)
-        # Round 3: only has one option and size matches:
+        # Round 4: only has one option and size matches:
             elif len(diff.oplist)==1:   # one option
                 opname = diff.oplist[0]
                 op_a = self.get_option(opname)
@@ -604,7 +644,7 @@ class OptionList:
                         op.set = True
                 else:
                     unkn_op_str(diff)
-        # Round 4: more than 2 options but only one option is below diff
+        # Round 5: more than 2 options but only one option is below diff
             else:
                 # TODO: remove self ref, and the implication of same options
                 # print(diff.oplist)
@@ -625,8 +665,7 @@ class OptionList:
         Diff.update_diffs()
 
         if Diff.saturated():
-            for item in ret:
-                print(item)
+            print("satisfied")
             return ret 
 
         # Eradicated enough cases, now need to run a powerset
@@ -648,10 +687,10 @@ class OptionList:
         print(Diff.diff_list)
                 
         print("first round eradication done.")
-        print("dep list {}:{}".format( self.name, [x.name for x in a_dep_list] ))
-        print("dry list {}:{}".format( another.name, [x.name for x in a_list] ))
-        print("dep list {}:{}".format( self.name, [x.name for x in b_dep_list] ))
-        print("dry list {}:{}".format( another.name, [x.name for x in b_list] ))
+        print("dep list {:7s}:{}".format( self.name, [x.name for x in a_dep_list] ))
+        print("dry list {:7s}:{}".format( self.name, [x.name for x in a_list] ))
+        print("dep list {:7s}:{}".format( another.name, [x.name for x in b_dep_list] ))
+        print("dry list {:7s}:{}".format( another.name, [x.name for x in b_list] ))
 
         # making the powerset
         a_perms = list(powerset(a_list))
@@ -662,7 +701,7 @@ class OptionList:
             ret = []
             for perm in perms:
                 flag = True
-                # for each member, if it has dependencies and none of dependencies show up in the case, remove it
+                # for each member, if it has dependencies and none of dependencies show up in the case, move it to garbage cases
                 for op in perm:
                     for eff in op.effects.values():
                         if len(eff.deps) == 0:
@@ -684,21 +723,43 @@ class OptionList:
 
         a_perms = filter_perms(a_perms, a_dep_list, Diff.pos_oplist)
         b_perms = filter_perms(b_perms, b_dep_list, Diff.neg_oplist)
-#        for y in a_perms:
-#            print([x.name for x in y])
-#        for y in b_perms:
-#            print([x.name for x in y])
+        
+        if DebugAllPermsSep:
+            print("{} perms:".format(self.name))
+            for y in a_perms:
+                print([x.name for x in y])
+            print("{} perms:".format(another.name))
+            for y in b_perms:
+                print([x.name for x in y])
 
         for a in a_perms:
             for b in b_perms:
                 list1 = [x.name for x in a]
                 list2 = [x.name for x in b]
-                if len(list(set(list1).intersection(list2)))>0:
-                    continue
-                perms.append({'a':a, 'b':b})
+                samelist = list(set(list1).intersection(list2))
+                discard=False
+                if len(samelist)>0:
+                    concat_list = [*a,*b]
+                    concat_list = [op for op in concat_list if op.name not in samelist]
+                    discard=True
+                    for poss_dep in samelist:
+                        for op in concat_list:
+                            if len( [eff for eff in op.effects.values() if poss_dep in eff.deps] )==0:
+                                discard=False
+                                break
+                        if not discard:
+                            break
+                if not discard:
+                    perms.append({'a':a, 'b':b})
         print("all permutations: {}.".format(len(perms)))
 
-        # core code for config permutation
+        if DebugAllPerms:
+            for item in perms:
+                al = [a.name for a in item['a']]
+                bl = [b.name for b in item['b']]
+                print("{{{},{}}}".format(al,bl))
+
+        # core code for config powerset
         res_out = {}
         for perm in perms:
             flattened_perm = tuple(( [*[self.name+"."+op.name for op in perm['a']],*[another.name+"."+op.name for op in perm['b']]  ]   ))
@@ -721,33 +782,23 @@ class OptionList:
                 op.verified = False
                 op.set = False
 
-        thres = 999
-#        maxcount = 4
         case = 0
         Diff.diff_list.append(self)
         for perm, res in sorted(res_out.items(),key=lambda kv:kv[1][0] ):
-            unkn_op_str, poss_op_str, add_details, set_diff, set_diff_str = case_fac()
-
-            if res[0] > thres:
+            if res[0] > AnswerList.Threshold:
                 continue
-            elif res[0] != 0 :
+            if case >= AnswerList.Maxcount:
+                break
+            unkn_op_str, poss_op_str, add_details, set_diff, set_diff_str = case_fac()
+            if res[0] != 0 :
                 set_diff(res[0])
                 set_diff_str(res[2])
-#            elif res[0] == 0:
-#                ret.append("\nExact matching case {}:".format(case))
-#            else:
-#                ret.append("\nNon-exact matching case {}, total abs diff {}:".format(case,res[0]))
             for op in perm:
                 names = op.split('.')
                 poss_op_str(names[1],names[0])
-#            ret.append(res[1])
             add_details(res[1])
             case += 1
-            if case > AnswerList.Maxcount:
-                break
 
-#        for item in ret:
-#            print(item)
         anls.prt()
         return ret
 
@@ -856,7 +907,7 @@ class Diff:
                 return False
         return True
 
-# Used for final output. TODO: Support verbose/simplified output
+# Used for final output.
 class AnswerList:
     # unknown are expressed as tuple(bound):diff
     class Case:
@@ -868,8 +919,8 @@ class AnswerList:
             self.details = ""
             ls.caselist.append(self)
 
-    Threshold = 100
-    Maxcount = 4
+    Threshold = 24
+    Maxcount = 8 
     Verbose = True
     Deprecated = False
 
@@ -881,7 +932,7 @@ class AnswerList:
         self.oplist = {self.a_name:{}, self.b_name:{}}
 
     def prt_case(self, case,count):
-        print("------------------------------------------------------------------------")
+        print("\n========================================================================")
         print("Case {}:".format(count))
         print("Total diff: {}".format(case.diff))
         print("------------------------------------------------------------------------")
@@ -899,6 +950,8 @@ class AnswerList:
         van_list2= [idx for idx in case.oplist[g_name]]
         van_list = [*van_list, *van_list2]
         maxc = max( len(msm_list), len(van_list) )
+        msm_list.sort()
+        van_list.sort()
         for i in range(maxc):
             a,b = "",""
             if i< len(msm_list):
@@ -906,21 +959,27 @@ class AnswerList:
             if i< len(van_list):
                 b = van_list[i].split("=")[0]
             print("{:35s}|{:35s}".format(a,b))
-        print("------------------------------------------------------------------------")
         if len(self.unknown.keys())>0 or len(case.unknown.keys())>0:
+            print("------------------------------------------------------------------------")
             print("Unknown:")
             for bound,diff in self.unknown.items():
                 print("{}:{}".format(bound,diff))
             for bound,diff in case.unknown.items():
                 print("{}:{}".format(bound,diff))
-            print("------------------------------------------------------------------------")
         if(AnswerList.Verbose):
+            print("------------------------------------------------------------------------")
             print("Details:")
             print(case.details)
-            print("------------------------------------------------------------------------")
-        print()
+        print("========================================================================\n")
 
     def prt(self):
+        print("\nConfigs:")
+        print("Maximum cases: {}".format(AnswerList.Maxcount))
+        print("Maximum total offset difference: {}".format(AnswerList.Threshold))
+        print("Printing results...")
+        if AnswerList.Verbose:
+            print("Verbose output on")
+        print("Total cases: {}".format(len(self.caselist)))
         if AnswerList.Deprecated:
             must_op_str = lambda x,who:print("{}: {} True.".format(who,x))
             poss_op_str = lambda x,who:print("{}: {} Potentially True.".format(who,x))
@@ -962,10 +1021,14 @@ class AnswerList:
                     print(item.details)
                     print(item.diff_str)
                 count+=1
-                if count > AnswerList.Maxcount:
+                if count >= AnswerList.Maxcount:
                     break
         else:
             count = 0
             for case in self.caselist:
                 self.prt_case(case,count)
                 count+=1
+                if case.diff>AnswerList.Threshold:
+                    break
+                if count>=AnswerList.Maxcount:
+                    break

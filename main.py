@@ -85,6 +85,8 @@ def get_search_range(r2, r2_id, funclist):
     print("searching for xrefs in {}...".format(r2_id))
     ret = []
     ret = r2.cmd("afij {}".format(FuncTar)).strip()
+    if len(ret)<=2:
+        return -1,-1
     ret = json.loads(ret)
     start = ret[0]["offset"]
     end = ret[0]["offset"]+ret[0]["size"]
@@ -188,8 +190,8 @@ def esil_exec_all_branch(r2, rg, starting_addr ):
             offset_head_str = offset_head_str[0:-1]
         offset_head = int(offset_head_str,16)
         if len(reses)<2:
-            print("Error: not enough regs in str instr at 0x{:x}".format(offset))
-            reses.append("pc")
+            print("Not enough regs in str instr at 0x{:x}, skip.".format(offset))
+            reses.append("blank")
             #exit()
         addrs[offset] = reses # str r0, [r1]: store r0 into place of r1
         offsets_head[offset] = offset_head
@@ -205,7 +207,7 @@ def esil_exec_all_branch(r2, rg, starting_addr ):
             offset_head_str = offset_head_str[0:-1]
         offset_head = int(offset_head_str,16)
         if len(reses)<2:
-            print("Error: not enough regs in ldr instr at 0x{:x}".format(offset))
+            print("not enough regs in ldr instr at 0x{:x}. Skipping...".format(offset))
             reses.append("pc")
             #exit()
         addrs[offset] = reses # ldr r0, [r1]: load content of r1 into r0
@@ -226,6 +228,7 @@ def esil_exec_all_branch(r2, rg, starting_addr ):
     #print("")
     targets_count = len([x for x in merged_list.keys() if merged_list[x]==2])
     print("Total target addresses found: {}".format(targets_count))
+    print([hex(x) for x in merged_list.keys() if merged_list[x]==2])
 
     print("generating block map...")
     
@@ -263,6 +266,8 @@ def esil_exec_all_branch(r2, rg, starting_addr ):
                 r2.cmd("aer {}={}".format(item['ref'],Magic))
             else:
                 r2.cmd("aer {}={}".format(item['ref'],Garbage))
+        r2.cmd("aer {}={}".format(tar_reg,Magic))
+
     def reset_env():
         reset_str = "aer0;aeim-;aei-;"
         r2.cmd(reset_str)
@@ -372,7 +377,9 @@ def process_i2c_new_device(r2,r2_id, struct):
     _,rg = get_search_range_i2c_0(r2,r2_id,funclist)
 
     esil_search = "r4,+,0xffffffff,&,=[4]"
-    reg_proc = lambda item: int(item['code'].split(',')[1],16)
+    # TODO: change here!!!!!
+    reg_proc = lambda item: int( item['code'][0:item['code'].find(esil_search)].split(',')[-2] ,16)
+    #reg_proc = lambda item: int(item['code'].split(',')[1],16)
     ret = []
     ret=ret+ search_esil(r2,rg[0],esil_search, proc=reg_proc) 
     ret.sort()
@@ -399,6 +406,9 @@ def process_device_resume(r2, r2_id, struct):
     funclist = FuncRange(tarfunc,None)
     anal_tar_func(r2,r2_id,funclist)
     rg = get_search_range_device_resume(r2,r2_id,funclist)
+    if rg[0]==-1:
+        # function not present
+        return True
     
     iters = esil_exec_all_branch(r2,rg,rg[0])
     ret = iters("r0")
@@ -415,32 +425,48 @@ def process_device_resume(r2, r2_id, struct):
 
 def process_device_initialize(r2, r2_id, struct):
     print("processing device_initialize...")
-    ls = ["devres_head.next","devres_head.prev", "dma_pools.next","dma_pools.prev","kobj"]
+    ls = ["devres_head.next","devres_head.prev", "dma_pools.next","dma_pools.prev"]
+    if r2_id == "vanilla":
+        ls+= ["kobj"]
     tarfunc = "sym.device_initialize"
     funclist = FuncRange(tarfunc,None)
     anal_tar_func(r2,r2_id,funclist)
     rg, rgs = get_search_range_device_initialize(r2,r2_id,funclist)
 
-    # hard coded part option recover. needs refactoring later
+    # hard coded option recovery. ugly as hell
     refs = [hex(x["to"]) for x in json.loads(r2.cmd("s "+tarfunc+"; afxj").strip()) if x["type"]=="call"] # get all func calls
     ref_funcs = [r2.cmd("?w "+ref).strip().split(' ')[1].strip() for ref in refs]
 
-    if "sym.complete_all" in ref_funcs:
-        struct.oplist.set_option("CONFIG_PM_SLEEP")
-        ls+= ['power.entry.next','power.entry.prev','power.completion','power.is_prepared','power.power_state','power.wakeup']
-    else:
-        struct.oplist.set_option("CONFIG_PM_SLEEP",False)
-
-    if "sym.__raw_spin_lock_init" in ref_funcs:
-        struct.oplist.set_option("CONFIG_DEBUG_SPINLOCK")
-    else:
-        struct.oplist.set_option("CONFIG_DEBUG_SPINLOCK",False)
-
+    runtime_flag = False
+    spinlock_flag = False
     res = r2.cmd("fs symbols;f~sym.pm_runtime_init").strip()
-    if len(res)<2:
+    if len(res)<=2:
         struct.oplist.set_option("CONFIG_PM_RUNTIME",False)
     else:
         struct.oplist.set_option("CONFIG_PM_RUNTIME")
+        runtime_flag = True
+
+    if "sym.lockdep_init_map" in ref_funcs:
+        struct.oplist.set_option("CONFIG_LOCKDEP")
+
+    if "sym.device_pm_init" in ref_funcs:
+        struct.oplist.set_option("CONFIG_PM_SLEEP")
+    else:
+        if "sym.complete_all" in ref_funcs:
+            struct.oplist.set_option("CONFIG_PM_SLEEP")
+            ls+= ['power.entry.next','power.entry.prev','power.completion','power.is_prepared','power.power_state','power.wakeup']
+        else:
+            struct.oplist.set_option("CONFIG_PM_SLEEP",False)
+            if not runtime_flag:
+                ls+= ['power.power_state', 'power.lock']
+
+
+    if "sym.__raw_spin_lock_init" in ref_funcs:
+        struct.oplist.set_option("CONFIG_DEBUG_SPINLOCK")
+        spinlock_flag = True
+    else:
+        struct.oplist.set_option("CONFIG_DEBUG_SPINLOCK",False)
+
 
     # hard code part end. only deal with first part of the code no matter what.
 
@@ -451,14 +477,21 @@ def process_device_initialize(r2, r2_id, struct):
     ret = ret[1]
     ret.sort()
 
-    if len(ret)-len(ls)==2:
-        ls+=['devres_lock.rlock.raw_lock', 'power.lock.rlock.raw_lock']
-    if len(ret)-len(ls)==1:
-        ls+=['devres_lock.rlock.raw_lock']
+    if not spinlock_flag: # Else throw an error
+        if len(ret)-len(ls)==2:
+            ls+=['devres_lock.rlock.dep_map', 'power.lock.rlock.dep_map']
+            #struct.oplist.set_option('CONFIG_DEBUG_LOCK_ALLOC')
+        if len(ret)-len(ls)==1:
+            ls+=['devres_lock.rlock.dep_map']
+            #struct.oplist.set_option('CONFIG_DEBUG_LOCK_ALLOC')
+
+    # Due to calculation of reg values, the Magic catch fails sometimes. This is a super ugly work around
+    #if len(ret)-len(ls)==-1:
+    #    ls.remove("kobj")
 
     prt_ret = [hex(x) for x in ret]
     ans = struct.map_list(ret,ls)
-    if struct.getOffset("devres_lock")!=-1 and struct.getOffset("devres_lock")-struct.getOffset("devres_head.next")==4:
+    if struct.getOffset("devres_lock.rlock.dep_map")!=-1 and struct.getOffset("devres_lock.rlock.dep_map")-struct.getOffset("devres_head.next")==4:
         struct.oplist.set_option("CONFIG_GENERIC_LOCKBREAK",False)
         struct.oplist.set_option("CONFIG_DEBUG_LOCK_ALLOC",False)
     return ans
@@ -482,12 +515,28 @@ def process():
     print("=================================================")
     print("analysis done!")
 
+def search_ops_in_config(fname):
+    struct = Struct_vanilla
+    print("detected vanilla kernel .config file {}".format(fname))
+    oplist_str = [x.name for x in struct.oplist.ops]
+    # first clear all
+    for op in struct.oplist.ops:
+        struct.oplist.set_option(op.name, False)
+    with open(fname) as f:
+        for line in f.readlines():
+            for item in oplist_str:
+                if item+"=" in  line:
+                    print("Vanilla Kernel: {} exists".format(item))
+                    struct.oplist.set_option(item,force=True)
+
 def init():
     global Msm_r2
     global Van_r2
     if(len(sys.argv)<3):
-        print("Usage: main.py van_bin msm_bin")
+        print("Usage: main.py van_bin msm_bin [.config]")
         exit()
+    elif(len(sys.argv)==4):
+        search_ops_in_config(sys.argv[3])
     print("reading target files...")
 
     Msm_r2 = r2pipe.open(sys.argv[2],["-q"])
