@@ -7,8 +7,9 @@ import r2pipe
 import os
 import sys
 import re
+import argparse
 
-from StructDevice import StructDevice
+from StructDevice import StructDevice,AnswerList
 from Basicblock import Basicblock
 
 Struct_vanilla = StructDevice("vanilla")
@@ -109,6 +110,7 @@ def get_search_range_i2c_0(r2, r2_id,funclist):
             ret = json.loads(ret)
             
             f_esil_str = esil_str(ret[0]['offset'])
+            print(f_esil_str)
             ret = r2.cmd(f_esil_str).strip()
             if len(ret)<=2:
                 if (item == "sym.kmem_cache_alloc"):
@@ -529,24 +531,42 @@ def search_ops_in_config(fname):
                     print("Vanilla Kernel: {} exists".format(item))
                     struct.oplist.set_option(item,force=True)
 
-def init():
+def parse_args():
     global Msm_r2
     global Van_r2
-    if(len(sys.argv)<3):
-        print("Usage: main.py van_bin msm_bin [.config]")
-        exit()
-    elif(len(sys.argv)==4):
-        search_ops_in_config(sys.argv[3])
-    print("reading target files...")
+    parser = argparse.ArgumentParser(description='Current msm kernel commit: 83789a7935f9. Please ensure vanilla kernel has i2c support.')
+    parser.add_argument('van', help='An integer for the accumulator')
+    parser.add_argument('msm', help='An integer for the accumulator')
+    parser.add_argument('cfg', help='.config file of vanilla kernel. Can be ignored.', default='')
+    parser.add_argument('-v', '--verbose', help='Allow verbose output of each offset difference in the results.', action='store_false')
+    parser.add_argument('-c', '--count', help='Maximum output count.', type=int, default=5)
+    parser.add_argument('-t', '--threshold', help='Maximum offset difference allowed.', type=int, default=0)
 
-    Msm_r2 = r2pipe.open(sys.argv[2],["-q"])
-    Van_r2 = r2pipe.open(sys.argv[1],["-q"])
+    args = parser.parse_args()
+    print("reading target files...")
+    if args.cfg != '':
+        search_ops_in_config(sys.argv[3])
+    AnswerList.Verbose = args.verbose
+    AnswerList.Threshold = args.threshold
+    AnswerList.Maxcount = args.count
+    Msm_r2 = r2pipe.open(sys.argv[2])
+    Van_r2 = r2pipe.open(sys.argv[1])
     if(Msm_r2==None):
         print("Error: msm kernel read failed.")
         exit()
     if(Van_r2==None):
         print("Error: vanilla kernel read failed.")
         exit()
+        
+
+def init():
+    parse_args()
+#    if(len(sys.argv)<3):
+#        print("Usage: main.py van_bin msm_bin [.config]")
+#        exit()
+#    elif(len(sys.argv)==4):
+#        search_ops_in_config(sys.argv[3])
+
     print("=================================================")
     print("reading files successful.")
     print("processing...")

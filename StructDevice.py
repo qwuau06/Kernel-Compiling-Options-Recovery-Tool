@@ -920,7 +920,7 @@ class AnswerList:
             ls.caselist.append(self)
 
     Threshold = 24
-    Maxcount = 8 
+    Maxcount = 3 
     Verbose = True
     Deprecated = False
 
