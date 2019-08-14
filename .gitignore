@@ -9,3 +9,5 @@ test_vanilla/*
 !test_vanilla/Makefile
 !test_vanilla/test_mod.c
 genlist.py
+tests
+tests/*

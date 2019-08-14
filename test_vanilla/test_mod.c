@@ -62,15 +62,32 @@ static int device_release(struct inode* inode, struct file * fp){
 
 static ssize_t device_read(struct file* fp, char * buf, size_t rlength, loff_t *offset){
 	struct device tst;
-	unsigned long tmp0,tmp1;
-	long* p, * q, *r;
-	p = 0x42;
-	q = 0x24;
-	r = 0x72;
-	tmp0 = (unsigned long)((void*)&tst.power.completion.wait.lock-(void*)&tst);
+	unsigned long tmp0,tmp1;//,tmp2,tmp3,tmp4,tmp5,tmp6,tmp7;
+	long* p, * q, *r, *s, *t, *x, *y, *z;
+	p = (long*)0x42;
+	q = (long*)0x24;
+	r = (long*)0x72;
+	s = (long*)0x89;
+	t = (long*)0x97;
+	x = (long*)0xa0;
+	y = (long*)0xb0;
+	z = (long*)0xc0;
+//	tmp0 = (unsigned long)((void*)&tst.power.suspend_timer-(void*)&tst);
+//	*p = tmp0;
+//	tmp1 = (unsigned long)((void*)&tst.power.timer_expires-(void*)&tst);
+//	*q = tmp1;
+	tmp0 = (unsigned long)((void*)&tst.power.constraints-(void*)&tst);
 	*p = tmp0;
-	tmp1 = (unsigned long)((void*)&tst.power.completion.wait.task_list-(void*)&tst);
+	tmp1 = (unsigned long)((void*)&tst.pm_domain-(void*)&tst);
 	*q = tmp1;
+//	tmp4 = (unsigned long)((void*)&tst.dma_parms-(void*)&tst);
+//	*t = tmp4;
+//	tmp5 = (unsigned long)((void*)&tst.dma_parms-(void*)&tst);
+//	*x = tmp5;
+//	tmp6 = (unsigned long)((void*)&tst.dma_parms-(void*)&tst);
+//	*y = tmp6;
+//	tmp7 = (unsigned long)((void*)&tst.dma_parms-(void*)&tst);
+//	*z = tmp7;
 	return 0;
 	
 }
