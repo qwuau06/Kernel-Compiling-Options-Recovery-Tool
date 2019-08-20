@@ -921,7 +921,7 @@ class AnswerList:
 
     Threshold = 24
     Maxcount = 3 
-    Verbose = True
+    Verbose = False
     Deprecated = False
 
     def __init__(self,a_name,b_name):

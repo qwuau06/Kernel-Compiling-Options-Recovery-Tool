@@ -538,7 +538,7 @@ def parse_args():
     parser.add_argument('van', help='An integer for the accumulator')
     parser.add_argument('msm', help='An integer for the accumulator')
     parser.add_argument('cfg', help='.config file of vanilla kernel. Can be ignored.', default='')
-    parser.add_argument('-v', '--verbose', help='Allow verbose output of each offset difference in the results.', action='store_false')
+    parser.add_argument('-v', '--verbose', help='Allow verbose output of each offset difference in the results.', action='store_true')
     parser.add_argument('-c', '--count', help='Maximum output count.', type=int, default=5)
     parser.add_argument('-t', '--threshold', help='Maximum offset difference allowed.', type=int, default=0)
 
