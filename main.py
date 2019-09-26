@@ -9,7 +9,8 @@ import sys
 import re
 import argparse
 
-from StructDevice import StructDevice,AnswerList
+from StructDevice import StructDevice
+from Structs import AnswerList
 from Basicblock import Basicblock
 
 Struct_vanilla = StructDevice("vanilla")
