@@ -1,4 +1,7 @@
-from Structs import StructBase, OptionList
+import r2pipe
+
+from utils import *
+from Structs import StructBase, OptionList, spinlock_t, listhead_t
 
 class StructDevice(StructBase):
     Members = [
@@ -120,19 +123,6 @@ class StructDevice(StructBase):
             "iommu",            # CONFIG_IOMMU_API: 4
             "mapping",          # CONFIG_ARM_DMA_USE_IOMMU: 4, *msm kernel only
             ]
-    spinlock_t = [                  #### spinlock_t model
-            "rlock.raw_lock",       # CONFIG_DEBUG_SPINLOCK || CONFIG_SMP: 4
-            "rlock.break_lock",     # CONFIG_GENERIC_LOCKBREAK: 4
-            "rlock.magic",          # CONFIG_DEBUG_SPINLOCK: 4
-            "rlock.owner_cpu",      # CONFIG_DEBUG_SPINLOCK: 4
-            "rlock.owner",          # CONFIG_DEBUG_SPINLOCK: 4
-            "rlock.dep_map",        # CONFIG_DEBUG_LOCK_ALLOC: lockdep_map
-            "__end_spinlock__"
-            ]
-    listhead_t = [
-            "next",
-            "prev"
-            ]
     SubMembers["devres_lock"] = spinlock_t.copy()
     SubMembers["mutex.wait_lock"] = spinlock_t.copy()
     SubMembers["power.lock"] = spinlock_t.copy()
@@ -166,23 +156,23 @@ class StructDevice(StructBase):
         
         # CONFIG_NUMA doesn't apply for ARM structure even if the option exists
 
-        OptionList.Op(self, "SMP", ["mutex.wait_list","mutex.__end_mutex__"], 4, ["mutex.owner"], tradable = ['DEBUG_MUTEXES'])
-        OptionList.Op(self, "DEBUG_MUTEXES", ["mutex.wait_list", "mutex.__end_mutex__"], 12, ["mutex.owner","mutex.name","mutex.magic"])
+        OptionList.Op.FullOp(self, "SMP", ["mutex.wait_list","mutex.__end_mutex__"], 4, ["mutex.owner"], tradable = ['DEBUG_MUTEXES'])
+        OptionList.Op.FullOp(self, "DEBUG_MUTEXES", ["mutex.wait_list", "mutex.__end_mutex__"], 12, ["mutex.owner","mutex.name","mutex.magic"])
 
-        OptionList.Op(self, "PINCTRL", ["pm_domain","dma_mask"], 4, ["pins"])
-        OptionList.Op(self, "CMA", ["dma_mem","archdata"], 4, ["cma_area"])
-        OptionList.Op(self, "(archdata.dma_ops)", ["archdata","of_node"], 4, ["dma_ops"])
+        OptionList.Op.FullOp(self, "PINCTRL", ["pm_domain","dma_mask"], 4, ["pins"])
+        OptionList.Op.FullOp(self, "CMA", ["dma_mem","archdata"], 4, ["cma_area"])
+        OptionList.Op.FullOp(self, "(archdata.dma_ops)", ["archdata","of_node"], 4, ["dma_ops"])
 
-        OptionList.Op(self, "PM_SLEEP", ["power.entry","power.should_wakeup"], 24,
+        OptionList.Op.FullOp(self, "PM_SLEEP", ["power.entry","power.should_wakeup"], 24,
                 ["power.entry","power.completion","power.wakeup","power.wakeup_path"], antimems=["power.should_wakeup"])
 
         subs = StructDevice.Members[ StructDevice.Members.index("power.suspend_timer"): StructDevice.Members.index("power.pq_req")+1 ] 
-        OptionList.Op(self, "PM_RUNTIME", ["power.suspend_timer","power.subsys_data"],120,subs) 
+        OptionList.Op.FullOp(self, "PM_RUNTIME", ["power.suspend_timer","power.subsys_data"],120,subs) 
 
-        OptionList.Op(self,"DMABOUNCE", ["dma_mem", "of_node"] , 4, ["archdata.dmabounce"] )
-        OptionList.Op(self,"IOMMU_API", ["dma_mem", "of_node"] , 4, ["archdata.iommu"] )
+        OptionList.Op.FullOp(self,"DMABOUNCE", ["dma_mem", "of_node"] , 4, ["archdata.dmabounce"] )
+        OptionList.Op.FullOp(self,"IOMMU_API", ["dma_mem", "of_node"] , 4, ["archdata.iommu"] )
 
-        OptionList.Op(self,"TIMER_STATS", ["power.suspend_timer", "power.timer_expires"], 24, [], deps = ["PM_RUNTIME"])
+        OptionList.Op.FullOp(self,"TIMER_STATS", ["power.suspend_timer", "power.timer_expires"], 24, [], deps = ["PM_RUNTIME"])
 
         # spinlock_t complications
         # lockdep_map: 8+4*(2)  CONFIG_LOCK_STAT:+8
@@ -193,25 +183,25 @@ class StructDevice(StructBase):
         ]
         for par in spinlock_subs:
             bound = [par+"rlock.raw_lock", par+"__end_spinlock__"]
-            OptionList.Op(self, "GENERIC_LOCKBREAK", bound, 4, [] )
-            OptionList.Op(self, "DEBUG_SPINLOCK", bound, 16, [])
-            OptionList.Op(self, "SMP", bound, 4, [], tradable = ["DEBUG_SPINLOCK"])
-            OptionList.Op(self, "DEBUG_LOCK_ALLOC", bound, 16, [])
-            OptionList.Op(self, "LOCK_STAT", bound, 8, [], deps = ["DEBUG_LOCK_ALLOC"])
+            OptionList.Op.FullOp(self, "GENERIC_LOCKBREAK", bound, 4, [] )
+            OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", bound, 16, [])
+            OptionList.Op.FullOp(self, "SMP", bound, 4, [], tradable = ["DEBUG_SPINLOCK"])
+            OptionList.Op.FullOp(self, "DEBUG_LOCK_ALLOC", bound, 16, [])
+            OptionList.Op.FullOp(self, "LOCK_STAT", bound, 8, [], deps = ["DEBUG_LOCK_ALLOC"])
         bound = ["power.completion.wait.lock.rlock.raw_lock","power.completion.wait.lock.__end_spinlock__"]
-        OptionList.Op(self, "GENERIC_LOCKBREAK", bound, 4, [] ,deps = ["PM_SLEEP"])
-        OptionList.Op(self, "DEBUG_SPINLOCK", bound, 16, [], deps = ["PM_SLEEP"])
-        OptionList.Op(self, "SMP", bound, 4, [], tradable = ["DEBUG_SPINLOCK"], deps = ["PM_SLEEP"])
-        OptionList.Op(self, "DEBUG_LOCK_ALLOC", bound, 16, [], deps = ["PM_SLEEP"])
-        OptionList.Op(self, "LOCK_STAT", bound, 8, [], deps = ["DEBUG_LOCK_ALLOC"])
+        OptionList.Op.FullOp(self, "GENERIC_LOCKBREAK", bound, 4, [] ,deps = ["PM_SLEEP"])
+        OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", bound, 16, [], deps = ["PM_SLEEP"])
+        OptionList.Op.FullOp(self, "SMP", bound, 4, [], tradable = ["DEBUG_SPINLOCK"], deps = ["PM_SLEEP"])
+        OptionList.Op.FullOp(self, "DEBUG_LOCK_ALLOC", bound, 16, [], deps = ["PM_SLEEP"])
+        OptionList.Op.FullOp(self, "LOCK_STAT", bound, 8, [], deps = ["DEBUG_LOCK_ALLOC"])
         for bound in extra_spinlocks:
-            OptionList.Op(self, "GENERIC_LOCKBREAK", bound, 4, [], deps = ["PM_RUNTIME"])
-            OptionList.Op(self, "DEBUG_SPINLOCK", bound, 16, [], deps = ["PM_RUNTIME"])
-            OptionList.Op(self, "SMP", bound, 4, [], deps = ["PM_RUNTIME"])
-            OptionList.Op(self, "DEBUG_LOCK_ALLOC", bound, 16, [], deps = ["PM_RUNTIME"])
-            OptionList.Op(self, "LOCK_STAT", bound, 8, [], deps = ["DEBUG_LOCK_ALLOC"])
-        OptionList.Op(self, "DEBUG_LOCK_ALLOC", ["mutex.magic", "bus"], 16, [])
-        OptionList.Op(self, "LOCK_STAT", ["mutex.magic", "bus"], 8, [], deps = ["DEBUG_LOCK_ALLOC"])
+            OptionList.Op.FullOp(self, "GENERIC_LOCKBREAK", bound, 4, [], deps = ["PM_RUNTIME"])
+            OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", bound, 16, [], deps = ["PM_RUNTIME"])
+            OptionList.Op.FullOp(self, "SMP", bound, 4, [], deps = ["PM_RUNTIME"])
+            OptionList.Op.FullOp(self, "DEBUG_LOCK_ALLOC", bound, 16, [], deps = ["PM_RUNTIME"])
+            OptionList.Op.FullOp(self, "LOCK_STAT", bound, 8, [], deps = ["DEBUG_LOCK_ALLOC"])
+        OptionList.Op.FullOp(self, "DEBUG_LOCK_ALLOC", ["mutex.magic", "bus"], 16, [])
+        OptionList.Op.FullOp(self, "LOCK_STAT", ["mutex.magic", "bus"], 8, [], deps = ["DEBUG_LOCK_ALLOC"])
 
         lockdeps_LOCKDEP = [
             ["power.suspend_timer", "power.timer_expires"],
@@ -220,8 +210,153 @@ class StructDevice(StructBase):
         
         # add lockdep_map ops
         for rg in lockdeps_LOCKDEP:
-            OptionList.Op(self, "LOCKDEP", rg, 16, [], deps = ["PM_RUNTIME"])
-            OptionList.Op(self, "LOCK_STAT", rg, 8, [], deps = ["LOCKDEP"])
+            OptionList.Op.FullOp(self, "LOCKDEP", rg, 16, [], deps = ["PM_RUNTIME"])
+            OptionList.Op.FullOp(self, "LOCK_STAT", rg, 8, [], deps = ["LOCKDEP"])
         # finished adding options
 
         #print(self.oplist.ops)
+
+#===========================================================
+
+Struct_vanilla = StructDevice("vanilla")
+Struct_msm = StructDevice("msm")
+
+def process_i2c_new_device(r2,r2_id, struct):
+    print ("processing i2c_new_device...")
+    ls = ['platform_data','bus','type','of_node','parent']
+    tarfunc = "sym.i2c_new_device"
+    tarfuncsubs = [
+                [
+                    "sym.i2c_check_addr_busy",
+                    "sym.dev_set_name"
+                ],
+                [
+                    "sym.kmem_cache_alloc",
+                    "sym.strlcpy"
+                ]
+            ]
+    if direct_check_op(r2, struct, "sym.kmem_cache_alloc_trace", "CONFIG_TRACING"):
+        tarfuncsubs[1][0] += "_trace"
+    funclist = FuncRange(tarfunc,tarfuncsubs)
+    anal_tar_func(r2,r2_id,funclist)
+    _,rg = get_search_range_i2c_0(r2,r2_id,funclist)
+
+    esil_search = "r4,+,0xffffffff,&,=[4]"
+    # TODO: change here!!!!!
+    reg_proc = lambda item: int( item['code'][0:item['code'].find(esil_search)].split(',')[-2] ,16)
+    #reg_proc = lambda item: int(item['code'].split(',')[1],16)
+    ret = []
+    ret=ret+ search_esil(r2,rg[0],esil_search, proc=reg_proc) 
+    ret.sort()
+    print(ret)
+    ret_tmp= search_esil(r2,rg[1],esil_search, proc=reg_proc) 
+    ret_tmp.sort()
+    ret_tmp = strip_head_tail(ret_tmp,1,1)
+    ret = ret+ret_tmp
+    print(ret)
+    branch_search = ",pc,=,}"
+    br_count = search_esil(r2,rg[1],branch_search)
+    if len(ret)==6 or len(br_count)>=2:
+        ls.append('archdata')
+    ret.sort()
+    ret = [x-0x20 for x in ret] # due to i2c_client offset
+    prt_ret = [hex(x) for x in ret]
+    return struct.map_list(ret, ls)
+
+
+def process_device_resume(r2, r2_id, struct):
+    print ("processing device_resume...")
+    ls = ['power.is_prepared','pm_domain','type','class','bus','driver','mutex']
+    tarfunc = "sym.device_resume"
+    funclist = FuncRange(tarfunc,None)
+    anal_tar_func(r2,r2_id,funclist)
+    rg = get_search_range_device_resume(r2,r2_id,funclist)
+    if rg[0]==-1:
+        # function not present
+        return True
+    
+    iters = esil_exec_all_branch(r2,rg,rg[0])
+    ret = iters("r0")
+    while ret[0]==False:
+        ret = iters("r0")
+    ret = ret[1]
+    ret.sort()
+    prt_ret = [hex(x) for x in ret]
+    return struct.map_list(ret,ls)
+
+
+# detect __raw_spin_lock_init => CONFIG_DEBUG_SPINLOCK
+# detect leaf function => CONFIG_PM_SLEEP not set!!!!
+
+def process_device_initialize(r2, r2_id, struct):
+    print("processing device_initialize...")
+    ls = ["devres_head.next","devres_head.prev", "dma_pools.next","dma_pools.prev"]
+    if r2_id == "vanilla":
+        ls+= ["kobj"]
+    tarfunc = "sym.device_initialize"
+    funclist = FuncRange(tarfunc,None)
+    anal_tar_func(r2,r2_id,funclist)
+    rg, rgs = get_search_range_device_initialize(r2,r2_id,funclist)
+
+    # hard coded option recovery. ugly as hell
+    refs = [hex(x["to"]) for x in json.loads(r2.cmd("s "+tarfunc+"; afxj").strip()) if x["type"]=="call"] # get all func calls
+    ref_funcs = [r2.cmd("?w "+ref).strip().split(' ')[1].strip() for ref in refs]
+
+    runtime_flag = False
+    spinlock_flag = False
+
+    direct_check_op(r2, struct, "sym.lockdep_init_map", "CONFIG_LOCKDEP",force=True)
+    if direct_check_op(r2, struct, "sym.pm_runtime_init", "CONFIG_PM_RUNTIME",force=True):
+        runtime_flag = True
+    if direct_check_op(r2, struct, "sym.__raw_spin_lock_init", "CONFIG_DEBUG_SPINLOCK",force=True):
+        spinlock_flag = True
+    direct_check_op(r2, struct, "sym.pm_notifier_call_chain","CONFIG_PM_SLEEP",force=True)
+
+    if not "sym.device_pm_init" in ref_funcs:
+        if "sym.complete_all" in ref_funcs:
+            ls+= ['power.entry.next','power.entry.prev','power.completion','power.is_prepared','power.power_state','power.wakeup']
+        else:
+            if not runtime_flag:
+                ls+= ['power.power_state', 'power.lock']
+
+    # hard code part end. only deal with first part of the code no matter what.
+    ret = []
+    iters = esil_exec_all_branch(r2,rgs,rg[0])
+    ret = iters("r0")
+    print([hex(x) for x in ret[1]])
+    ret = ret[1]
+    ret.sort()
+
+    if not spinlock_flag: # Else throw an error
+        if len(ret)-len(ls)==2:
+            ls+=['devres_lock.rlock.dep_map', 'power.lock.rlock.dep_map']
+            #struct.oplist.set_option('CONFIG_DEBUG_LOCK_ALLOC')
+        if len(ret)-len(ls)==1:
+            ls+=['devres_lock.rlock.dep_map']
+            #struct.oplist.set_option('CONFIG_DEBUG_LOCK_ALLOC')
+
+    prt_ret = [hex(x) for x in ret]
+    ans = struct.map_list(ret,ls)
+    if struct.getOffset("devres_lock.rlock.dep_map")!=-1 and struct.getOffset("devres_lock.rlock.dep_map")-struct.getOffset("devres_head.next")==4:
+        struct.oplist.set_option("CONFIG_GENERIC_LOCKBREAK",False)
+        struct.oplist.set_option("CONFIG_DEBUG_LOCK_ALLOC",False)
+    return ans
+
+
+def process_StructDevice(Msm_r2, Van_r2):
+    def run_comp(func):
+        msm_res = func(Msm_r2, "msm", Struct_msm)
+        van_res = func(Van_r2, "vanilla",Struct_vanilla)
+        print("=================================================")
+        if msm_res == False or van_res == False:
+            print("Offset processing failed. Exiting...")
+            exit()
+    run_comp(process_i2c_new_device)
+    run_comp(process_device_resume)
+    run_comp(process_device_initialize)
+
+    # the actual comparing
+    Struct_msm.cmp(Struct_vanilla)
+
+    print("=================================================")
+    print("Struct Device analysis done!")

@@ -38,6 +38,21 @@ DebugAllPermsSep = False
 DebugAllPerms = False
 DebugMembersPrt = False
 
+# some shared contents
+spinlock_t = [                  #### spinlock_t model
+        "rlock.raw_lock",       # CONFIG_DEBUG_SPINLOCK || CONFIG_SMP: 4
+        "rlock.break_lock",     # CONFIG_GENERIC_LOCKBREAK: 4
+        "rlock.magic",          # CONFIG_DEBUG_SPINLOCK: 4
+        "rlock.owner_cpu",      # CONFIG_DEBUG_SPINLOCK: 4
+        "rlock.owner",          # CONFIG_DEBUG_SPINLOCK: 4
+        "rlock.dep_map",        # CONFIG_DEBUG_LOCK_ALLOC: lockdep_map
+        "__end_spinlock__"
+        ]
+listhead_t = [
+        "next",
+        "prev"
+        ]
+
 def powerset(iterable):
     s = list(iterable)
     return itertools.chain.from_iterable(itertools.combinations(s, r) for r in range(len(s)+1))
@@ -91,6 +106,7 @@ class StructBase:
         print("initialization done.")
         if DebugMembersPrt:
             print(cls.Members)
+
 
     @classmethod
     def getIndex(cls,member):
@@ -267,23 +283,40 @@ class OptionList:
                 return ret
 
         # each option isn't bound to a specific struct, but each effect is, and __init__ is called per effect
-        def __init__(self, struct, name, bound, extrab, extram, deps=[], antimems = [],tradable = [] ):
+        def __init__(self, name):
+            self.name = name
+            # {[bound]:{extramems, extrabytes, subs}}
+            self._effects = {}
+
+            self.set = False
+            self.verified = False
+            self.suspected = False
+
+        @classmethod
+        def get_op(cls, oplist, name):
             if name != "(archdata.dma_ops)":
                 name = OptionList.Op.Cfg+name
-            oplist = struct.oplist
+            #print("{}:{}".format(oplist.name,name))
             existed = [x for x in oplist.ops if x.name == name]
             if len(existed)>0:
-                self = existed[0]
+                return existed[0]
+            elif len(existed)>1:
+                print("Error: duplicate option {}.".format(name))
+                exit()
             else:
-                oplist.ops.append(self)
-                self.name = name
-                # {[bound]:{extramems, extrabytes, subs}}
-                self._effects = {}
+                newop = OptionList.Op(name)
+                oplist.ops.append(newop)
+                return newop
+        
+        @classmethod
+        def DirectOp(cls, oplist, name):
+            newop = cls.get_op(oplist,name)
+            return newop
 
-                self.set = False
-                self.verified = False
-                self.suspected = False
-
+        @classmethod
+        def FullOp(cls, struct, name, bound, extrab, extram, deps=[], antimems = [],tradable = []):
+            oplist = struct.oplist
+            newop = cls.get_op(oplist,name)
             deps = [OptionList.Op.Cfg+x for x in deps]
             tradable = [OptionList.Op.Cfg+x for x in tradable]
             for item in deps:
@@ -297,16 +330,16 @@ class OptionList:
                 par = pars[0]
                 # insert children
                 par_effs = par.get_eff_list(type(struct))
-                self_effs = self.get_eff_list(type(struct))
+                self_effs = newop.get_eff_list(type(struct))
                 for pareffbd in par_effs.keys():
                     for bd in self_effs.keys():
                         if type(struct).range_in_range(bd,pareffbd):
-                            if self not in par_effs[pareffbd].children:
-                                par_effs[pareffbd].children.append(self)
+                            if newop not in par_effs[pareffbd].children:
+                                par_effs[pareffbd].children.append(newop)
                             break
-
             # add new effect into dict
-            self._effects[tuple((type(struct).__name__,tuple((bound))))] = OptionList.Op.Effect(name, struct, extrab, extram, deps, antimems,tradable)
+            newop._effects[tuple((type(struct).__name__,tuple((bound))))] = OptionList.Op.Effect(name, struct, extrab, extram, deps, antimems,tradable)
+            return newop
 
         def __repr__(self):
             ret = "\n\n{}:\n".format(self.name)
@@ -333,7 +366,9 @@ class OptionList:
     def __init__(self,name):
         self.name = name
         self.ops = []
-        # populate is left for each struct.
+        # populate is left for each struct. but there are some always exist options
+        OptionList.Op.DirectOp(self, "TRACING")
+        
 
     def set_option(self, opname, val=True, suspected = False, force=False):
         if opname not in [o.name for o in self.ops]:
@@ -354,6 +389,12 @@ class OptionList:
         if len(t)==0:
             print("Error: unknown option {}.".format(opname))
         return t[0]
+
+    def check_option(self,opname):
+        op = self.get_option(opname)
+        if op.set and op.verified and not op.suspected:
+            return True
+        return False
 
     # core function
     # this function is only used from vanilla to msm, diff is offset of msm-vanilla
