@@ -4,7 +4,7 @@ from utils import *
 from Structs import StructBase, OptionList, spinlock_t, listhead_t
 
 class StructFile(StructBase):
-    StructMembers = [
+    Members = [
             "f_u",              # EXPAND; 8
             "f_path",           # 8
             "f_op",             # 4
@@ -60,8 +60,8 @@ class StructFile(StructBase):
             "dep_map",        # CONFIG_DEBUG_LOCK_ALLOC: lockdep_map
             "__end_rwlock__"
             ]
-    SubMembers["f_ep_links"] = lockhead_t.copy()
-    SubMembers["f_tfile_llink"] = lockhead_t.copy()
+    SubMembers["f_ep_links"] = listhead_t.copy()
+    SubMembers["f_tfile_llink"] = listhead_t.copy()
     SubMembers["f_ra"]=[
             "start",            # 4
             "size",             # 4
@@ -76,43 +76,59 @@ class StructFile(StructBase):
             # Empty
             ]
 
-    def __init__(self,name):
-        super().__init__(name)
+    def __init__(self,name,oplist):
+        super().__init__(name,oplist)
         self.populate_oplist()
 
     def populate_oplist(self):
-        OptionList.Op(self, "SMP", ["f_op","f_count"], 4, ["f_sb_list_cpu"])
-        OptionList.Op(self, "SECURITY", ["f_version","private_data"], 4, ["f_security"])
-        OptionList.Op(self, "EPOLL", ["private_data","f_mapping"], 16, ["f_ep_links", "f_file_llink"])
-        OptionList.Op(self, "DEBUG_WRITECOUNT", ["f_mapping","__end__"], 4, ["f_mnt_write_state"])
-        OptionList.Op(self, "DEBUG_SPINLOCK", ["f_owner.lock","f_owner.__end_rwlock__"], 16, ["f_owner.lock.raw_lock", "f_owner.lock.magic", "f_owner.lock.owner_cpu","f_owner.lock.owner"])
-        OptionList.Op(self, "SMP", ["f_owner.lock","f_owner.__end_rwlock__"], 4, ["f_owner.lock.raw_lock"], tradable = ["DEBUG_SPINLOCK"])
-        OptionList.Op(self, "DEBUG_SPINLOCK", ["f_op","f_count"], 16, ["f_lock.rlock.raw_lock", "f_lock.rlock.magic", "f_lock.rlock.owner_cpu","f_lock.rlock.owner"])
-        OptionList.Op(self, "SMP", ["f_op","f_count"], 4, ["f_lock.rlock.raw_lock"], tradable = ["DEBUG_SPINLOCK"])
+        OptionList.Op.FullOp(self, "SMP", ["f_op","f_count"], 4, ["f_sb_list_cpu"])
+        OptionList.Op.FullOp(self, "SECURITY", ["f_version","private_data"], 4, ["f_security"])
+        OptionList.Op.FullOp(self, "EPOLL", ["private_data","f_mapping"], 16, ["f_ep_links", "f_file_llink"])
+        OptionList.Op.FullOp(self, "DEBUG_WRITECOUNT", ["f_mapping","__end__"], 4, ["f_mnt_write_state"])
+        OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 16, ["f_owner.lock.raw_lock", "f_owner.lock.magic", "f_owner.lock.owner_cpu","f_owner.lock.owner"])
+        OptionList.Op.FullOp(self, "SMP", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 4, ["f_owner.lock.raw_lock"], tradable = ["DEBUG_SPINLOCK"])
+        OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", ["f_op","f_count"], 16, ["f_lock.rlock.raw_lock", "f_lock.rlock.magic", "f_lock.rlock.owner_cpu","f_lock.rlock.owner"])
+        OptionList.Op.FullOp(self, "SMP", ["f_op","f_count"], 4, ["f_lock.rlock.raw_lock"], tradable = ["DEBUG_SPINLOCK"])
 
         # spinlock_t complications
         # lockdep_map: 8+4*(2)  CONFIG_LOCK_STAT:+8
         # appearance: DEBUG_LOCK_ALLOC: spinlock_t 
-        OptionList.Op(self, "GENERIC_LOCKBREAK", ["f_owner.lock","f_owner.__end_rwlock__"], 4, ["f_onwer.lock.break_lock"])
-        OptionList.Op(self, "GENERIC_LOCKBREAK", ["f_op","f_count"], 4, ["f_lock.rlock.break_lock"])
-        OptionList.Op(self, "DEBUG_LOCK_ALLOC", ["f_owner.lock","f_owner.__end_rwlock__"], 16, [])
-        OptionList.Op(self, "DEBUG_LOCK_ALLOC", ["f_op","f_count"], 16, [])
-        OptionList.Op(self, "LOCK_STAT", ["f_owner.lock","f_owner.__end_rwlock__"], 8, [], deps=["DEBUG_LOCK_ALLOC"])
-        OptionList.Op(self, "LOCK_STAT", ["f_op","f_count"], 8, [], deps=["DEBUG_LOCK_ALLOC"])
+        OptionList.Op.FullOp(self, "GENERIC_LOCKBREAK", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 4, ["f_onwer.lock.break_lock"])
+        OptionList.Op.FullOp(self, "GENERIC_LOCKBREAK", ["f_op","f_count"], 4, ["f_lock.rlock.break_lock"])
+        OptionList.Op.FullOp(self, "DEBUG_LOCK_ALLOC", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 16, [])
+        OptionList.Op.FullOp(self, "DEBUG_LOCK_ALLOC", ["f_op","f_count"], 16, [])
+        OptionList.Op.FullOp(self, "LOCK_STAT", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 8, [], deps=["DEBUG_LOCK_ALLOC"])
+        OptionList.Op.FullOp(self, "LOCK_STAT", ["f_op","f_count"], 8, [], deps=["DEBUG_LOCK_ALLOC"])
 
 #========================================================
 
-Struct_vanilla = StructFile("vanilla")
-Struct_msm = StructFile("msm")
+
+def get_search_range_dentry_open(r2, r2_id, funclist):
+    return get_search_range(r2,r2_id,funclist)
 
 def process_dentry_open(r2, r2_id, struct):
     print("processing __dentry_open...")
+    ls = ['f_mode','f_mapping','f_path.dentry','f_path.mnt','f_flags','f_pos','f_op','f_mnt_write_state']
     tarfunc = "sym.__dentry_open.isra"
     tarfunc = r2.cmd("fs symbols;f~{}".format(tarfunc)).strip().split(' ')[2]
+    funclist = FuncRange(tarfunc,None)
+    anal_tar_func(r2,r2_id,funclist)
+    rg = get_search_range_dentry_open(r2,r2_id,funclist)
+    if rg[0]==-1:
+        # function not present
+        return True
+    
+    iters = esil_exec_all_branch(r2,rg,rg[0])
+    ret = iters("r2")
+    while ret[0]==False:
+        ret = iters("r2")
+    ret = ret[1]
+    ret.sort()
+    return struct.map_list(ret,ls)
 
-    None
-
-def process_StructFile():
+def process_StructFile(Msm_r2, Van_r2, Msm_oplist, Van_oplist):
+    Struct_vanilla = StructFile("vanilla", Van_oplist)
+    Struct_msm = StructFile("msm", Msm_oplist)
     def run_comp(func):
         msm_res = func(Msm_r2, "msm", Struct_msm)
         van_res = func(Van_r2, "vanilla",Struct_vanilla)
@@ -125,5 +141,5 @@ def process_StructFile():
     # the actual comparing
     Struct_msm.cmp(Struct_vanilla)
 
-    print("=================================================")
     print("Struct File analysis done!")
+    print("=================================================")

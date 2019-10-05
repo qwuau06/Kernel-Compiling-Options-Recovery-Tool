@@ -76,14 +76,17 @@ class StructBase:
             return True
         else:
             return False
-    
-    def __init__(self,name):
+
+    def __init__(self,name,oplist):
         self.name = name
         if not type(self).initialized:
             type(self).init_members()
         self.offsets = [UNDEF]*len(type(self).Members) # offsets of each member
         self.offsets[0] = 0 # parent is always the first member
-        self.oplist = OptionList(name)
+        if oplist.name != name:
+            print("Error:wrong oplist given for {}, {}.".format(name,type(self).__name__))
+            exit()
+        self.oplist = oplist
         
     @classmethod
     def init_members(cls):
@@ -101,6 +104,7 @@ class StructBase:
                 cls.SubMembers[item] = None
             cls.SubMembers = {x:y for x,y in cls.SubMembers.items() if y!=None}
         cls.initialized = True
+        print("initializing Revmap...")
         for idx, item in enumerate(cls.Members):
             cls.Revmap[item] = idx
         print("initialization done.")

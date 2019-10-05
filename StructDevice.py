@@ -139,8 +139,8 @@ class StructDevice(StructBase):
 #            "power.suspend_time":"CONFIG_PM_RUNTIME",
             }
 
-    def __init__(self,name):
-        super().__init__(name)
+    def __init__(self,name,oplist):
+        super().__init__(name,oplist)
         self.populate_oplist()
 
         # msm has an extra member in archdata
@@ -218,8 +218,51 @@ class StructDevice(StructBase):
 
 #===========================================================
 
-Struct_vanilla = StructDevice("vanilla")
-Struct_msm = StructDevice("msm")
+
+def get_search_range_i2c_0(r2, r2_id,funclist):
+    start,end = get_search_range(r2,r2_id,funclist)
+    FuncTarSubs = funclist.SubFlags
+    range_str= Range_str.format(start,end)
+    esil_str = lambda s : range_str+"/cej pc,lr,=,{},pc,=".format(s)
+    
+    fret = []
+    for pairs in FuncTarSubs:
+        tar_addr = []
+        for item in pairs:
+            ret = r2.cmd("afij "+item).strip()
+            if len(ret)<=2:
+                print("reading {} info failed".format(item))
+                exit()
+            ret = json.loads(ret)
+            
+            f_esil_str = esil_str(ret[0]['offset'])
+            print(f_esil_str)
+            ret = r2.cmd(f_esil_str).strip()
+            if len(ret)<=2:
+                print("no esil found, esil: {}".format(f_esil_str))
+                exit()
+            ret = json.loads(ret)
+            tar_addr.append(ret[0]['offset'])
+        fret.append(tuple(tar_addr))
+    return (start,end), fret
+
+def get_search_range_device_resume(r2, r2_id, funclist):
+    return get_search_range(r2,r2_id,funclist)
+
+def get_search_range_device_initialize(r2, r2_id, funclist):
+    start,end = get_search_range(r2,r2_id,funclist)
+    
+    ret = r2.cmd("afbj @ {}".format(funclist.FuncTar))
+    ret = json.loads(ret)
+    fret = []
+    for item in ret:
+        sub_start = item["addr"]
+        sub_size = item["size"]
+        fret.append(tuple((sub_start, sub_start+sub_size)))
+    if not fret[0][0] == start:
+        fret[0],fret[1] = fret[1], fret[0]
+
+    return (start,end),fret
 
 def process_i2c_new_device(r2,r2_id, struct):
     print ("processing i2c_new_device...")
@@ -343,7 +386,9 @@ def process_device_initialize(r2, r2_id, struct):
     return ans
 
 
-def process_StructDevice(Msm_r2, Van_r2):
+def process_StructDevice(Msm_r2, Van_r2, Msm_oplist, Van_oplist):
+    Struct_vanilla = StructDevice("vanilla", Van_oplist)
+    Struct_msm = StructDevice("msm", Msm_oplist)
     def run_comp(func):
         msm_res = func(Msm_r2, "msm", Struct_msm)
         van_res = func(Van_r2, "vanilla",Struct_vanilla)
@@ -358,5 +403,5 @@ def process_StructDevice(Msm_r2, Van_r2):
     # the actual comparing
     Struct_msm.cmp(Struct_vanilla)
 
-    print("=================================================")
     print("Struct Device analysis done!")
+    print("=================================================")
