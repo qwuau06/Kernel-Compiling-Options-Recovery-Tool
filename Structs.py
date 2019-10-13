@@ -5,6 +5,7 @@
 ########################################
 
 import itertools
+from AnswerList import AnswerList
 
 #     Struct Device         Struct File
 #               |            |
@@ -239,7 +240,7 @@ class StructBase:
             else:
                 #print("member registered in both kernel: {}, offset {}, {}.".format(type(self).Members[idx],hex(a), hex(b)))
                 None
-        self.oplist.analyze_between(another,type(self))
+        return self.oplist.analyze_between(another,type(self))
 
     def map_list(self,offs, mems):
         if len(offs) != len(mems):
@@ -295,6 +296,9 @@ class OptionList:
             self.set = False
             self.verified = False
             self.suspected = False
+
+        def get_key_names(self):
+            return dict.fromkeys([x[0] for x in self._effects.keys()]).keys()
 
         @classmethod
         def get_op(cls, oplist, name):
@@ -356,6 +360,9 @@ class OptionList:
                     ret+=" \n{}: {}+extra:{}".format(rg, eff.bytes, [x.name for x in eff.children])
             return ret
 
+        def get_eff_list_name(self,clsname):
+            return {t[1]:self._effects[t] for t in self._effects.keys() if t[0]==clsname}
+
         def get_eff_list(self,cls):
             return {t[1]:self._effects[t] for t in self._effects.keys() if t[0]==cls.__name__}
 
@@ -367,9 +374,10 @@ class OptionList:
             print("Error: Didn't find {} with in {}.".format(bounds, self.name))
             return None
 
-    def __init__(self,name):
+    def __init__(self,name, anls):
         self.name = name
         self.ops = []
+        self.anls = anls
         # populate is left for each struct. but there are some always exist options
         OptionList.Op.DirectOp(self, "TRACING")
         
@@ -382,6 +390,8 @@ class OptionList:
         if op.verified==True and op.set != val:
             if not force:
                 print("Error: conflicting options: {}".format(opname))
+                import traceback
+                traceback.print_stack()
                 exit()
         oldval = op.set
         op.set=val
@@ -415,7 +425,7 @@ class OptionList:
     # case 3: more than one option and cannot decide: powerset over all possibilities, calc offset for each. find the most relateable one
 
     def analyze_between(self, another, cls):
-        anls = AnswerList(self.name, another.name)
+        anls = self.anls
         another = another.oplist
         Diff.pos_oplist = self
         Diff.neg_oplist = another
@@ -429,21 +439,11 @@ class OptionList:
         a_list = self.ops
         b_list = another.ops
         print("Start analysis...")
-        ret = []
 
         def must_op_str(x,who): anls.oplist[who.name][x.name] = True
         def none_op_str(x,who): anls.oplist[who.name][x.name] = False
         def unkn_op_str(x): anls.unknown[tuple(x.bounds)] = x.diff
 
-        # func factory for case specific options
-        def case_fac():
-            case = AnswerList.Case(anls)
-            def unkn_op_str(x): case.unknown[tuple(x.bound)] = x.diff
-            def poss_op_str(x,who): case.oplist[who].append(x)
-            def add_details(d): case.details = d
-            def set_diff(d): case.diff = d
-            def set_diff_str(d): case.diff_str = d 
-            return unkn_op_str, poss_op_str, add_details, set_diff, set_diff_str
 
         # Round 1: remove known options:
         for op in a_list:
@@ -514,10 +514,24 @@ class OptionList:
                     op.set = True
         Diff.update_diffs(cls)
 
-        if Diff.saturated(cls):
-            print("satisfied")
-            return ret 
+    def calc_options(self, another):
+        if self.name != "msm":
+            print("Error:calc_option can only be called by msm kernel.")
+            exit()
+        anls = self.anls
+        a_list = self.ops
+        b_list = another.ops
+        ret = []
 
+        # func factory for case specific options
+        def case_fac():
+            case = AnswerList.Case(anls)
+            def unkn_op_str(x): case.unknown[tuple(x.bound)] = x.diff
+            def poss_op_str(x,who): case.oplist[who].append(x)
+            def add_details(d): case.details = d
+            def set_diff(d): case.diff = d
+            def set_diff_str(d): case.diff_str = d 
+            return unkn_op_str, poss_op_str, add_details, set_diff, set_diff_str
         # Eradicated enough cases, now need to run a powerset
         # diff_list = [x for x in diff_list if x.expected != x.diff]
         a_dep_list = [x for x in a_list if x.verified and x.set and not x.suspected] # sure existing members
@@ -526,7 +540,7 @@ class OptionList:
         a_list = []
         b_list = []
         print("Populating perm lists")
-        for diff in Diff.get_diff_list(cls):
+        for diff in Diff.get_merged_list():
             for opname in diff.oplist:
                 a_op = self.get_option(opname)
                 b_op = another.get_option(opname)
@@ -534,7 +548,8 @@ class OptionList:
                     a_list.append(a_op)
                 if b_op not in b_list and not(b_op.verified and not b_op.set) and b_op not in b_dep_list:
                     b_list.append(b_op)
-        print(Diff.get_diff_list(cls))
+        for cls in Diff.diff_list.keys():
+            print(Diff.get_diff_list(cls))
                 
         print("first round eradication done.")
         print("dep list {:7s}:{}".format( self.name, [x.name for x in a_dep_list] ))
@@ -571,8 +586,9 @@ class OptionList:
                     ret.append(perm)
             return ret
 
-        a_perms = filter_perms(a_perms, a_dep_list, Diff.pos_oplist,cls)
-        b_perms = filter_perms(b_perms, b_dep_list, Diff.neg_oplist,cls)
+        for cls in Diff.diff_list.keys():
+            a_perms = filter_perms(a_perms, a_dep_list, Diff.pos_oplist,cls)
+            b_perms = filter_perms(b_perms, b_dep_list, Diff.neg_oplist,cls)
         
         if DebugAllPermsSep:
             print("{} perms:".format(self.name))
@@ -594,9 +610,10 @@ class OptionList:
                     discard=True
                     for poss_dep in samelist:
                         for op in concat_list:
-                            if len( [eff for eff in op.get_eff_list(cls).values() if poss_dep in eff.deps] )==0:
-                                discard=False
-                                break
+                            for clsname in op.get_key_names():
+                                if len( [eff for eff in op.get_eff_list_name(clsname).values() if poss_dep in eff.deps] )==0:
+                                    discard=False
+                                    break
                         if not discard:
                             break
                 if not discard:
@@ -617,12 +634,12 @@ class OptionList:
                 op.suspected = True
                 op.verified = True
                 op.set = True
-            Diff.update_diffs(cls,True)
-            details = ("Post update:...\n{}".format(Diff.get_diff_list(cls)))
+            Diff.update_diffs_all(True)
+            details = ("Post update:...\n{}".format(Diff.get_merged_list()))
             # add into dict
             total_diff = 0 
             diff_str = "debug: "
-            for x_diff in Diff.get_diff_list(cls):
+            for x_diff in Diff.get_merged_list():
                 total_diff += abs(x_diff.diff-x_diff.expected)
                 diff_str += "{}-{}, ".format(x_diff.diff,x_diff.expected)
             res_out[flattened_perm] = tuple((total_diff,details,diff_str))
@@ -633,7 +650,7 @@ class OptionList:
                 op.set = False
 
         case = 0
-        Diff.get_diff_list(cls).append(self)
+        #Diff.get_diff_list(cls).append(self)
         for perm, res in sorted(res_out.items(),key=lambda kv:kv[1][0] ):
             if res[0] > AnswerList.Threshold:
                 continue
@@ -679,7 +696,10 @@ class Diff:
             
     def get_diff_list(cls):
         return Diff.diff_list[cls]
-                
+
+    def get_merged_list():
+        return [x for y in Diff.diff_list.values() for x in y]
+
     def option_in_range(self, option, cls):
         opbound = option.get_eff_list(cls).keys()
         for opbd in opbound: # self bound inside bd
@@ -691,6 +711,10 @@ class Diff:
         #opls = [y.name for y in self.oplist for x in OptionList.get_option(y).effects if len(x.deps)==0]
         #opls += ["child:"+y.name for y in self.oplist for x in OptionList.get_option(y).effects if len(x.deps)>0]
         return "\n{}={}:{},{}".format(self.diff,self.expected, self.bounds, self.oplist)
+
+    def update_diffs_all(fake=False):
+        for cls in Diff.diff_list.keys():
+            Diff.update_diffs(cls,fake)
 
     # update diffs after changes in options.
     # TODO:this function should not depend on struct, but currently doesn't have a better way, unless rewriting it.
@@ -762,128 +786,3 @@ class Diff:
                 return False
         return True
 
-# Used for final output.
-class AnswerList:
-    # unknown are expressed as tuple(bound):diff
-    class Case:
-        def __init__(self,ls):
-            self.oplist = {ls.a_name:[], ls.b_name:[]}
-            self.unknown = {}
-            self.diff = 0
-            self.diff_str = ""
-            self.details = ""
-            ls.caselist.append(self)
-
-    Threshold = 24
-    Maxcount = 3 
-    Verbose = False
-    Deprecated = False
-
-    def __init__(self,a_name,b_name):
-        self.caselist = []
-        self.a_name = a_name
-        self.b_name = b_name
-        self.unknown = {}
-        self.oplist = {self.a_name:{}, self.b_name:{}}
-
-    def prt_case(self, case,count):
-        print("\n========================================================================")
-        print("Case {}:".format(count))
-        print("Total diff: {}".format(case.diff))
-        print("------------------------------------------------------------------------")
-        print("               msm                 |               vanilla              ")
-        print("------------------------------------------------------------------------")
-        t_name = self.a_name
-        g_name = self.b_name
-        if self.a_name == "vanilla":
-            t_name = self.b_name
-            g_name = self.a_name
-        msm_list = [idx for idx, x in self.oplist[t_name].items() if x]
-        msm_list2= [idx for idx in case.oplist[t_name]]
-        msm_list = [*msm_list, *msm_list2]
-        van_list = [idx for idx, x in self.oplist[g_name].items() if x]
-        van_list2= [idx for idx in case.oplist[g_name]]
-        van_list = [*van_list, *van_list2]
-        maxc = max( len(msm_list), len(van_list) )
-        msm_list.sort()
-        van_list.sort()
-        for i in range(maxc):
-            a,b = "",""
-            if i< len(msm_list):
-                a = msm_list[i].split("=")[0]
-            if i< len(van_list):
-                b = van_list[i].split("=")[0]
-            print("{:35s}|{:35s}".format(a,b))
-        if len(self.unknown.keys())>0 or len(case.unknown.keys())>0:
-            print("------------------------------------------------------------------------")
-            print("Unknown:")
-            for bound,diff in self.unknown.items():
-                print("{}:{}".format(bound,diff))
-            for bound,diff in case.unknown.items():
-                print("{}:{}".format(bound,diff))
-        if(AnswerList.Verbose):
-            print("------------------------------------------------------------------------")
-            print("Details:")
-            print(case.details)
-        print("========================================================================\n")
-
-    def prt(self):
-        print("\nConfigs:")
-        print("Maximum cases: {}".format(AnswerList.Maxcount))
-        print("Maximum total offset difference: {}".format(AnswerList.Threshold))
-        print("Printing results...")
-        if AnswerList.Verbose:
-            print("Verbose output on")
-        print("Total cases: {}".format(len(self.caselist)))
-        if AnswerList.Deprecated:
-            must_op_str = lambda x,who:print("{}: {} True.".format(who,x))
-            poss_op_str = lambda x,who:print("{}: {} Potentially True.".format(who,x))
-            none_op_str = lambda x,who:print("{}: {} False.".format(who,x))
-            unkn_op_str = lambda bound,diff:print("Unknown Option between {} and {}, size {}.".format(bounds[0],bounds[1],diff))
-            for item,ans in self.oplist[self.a_name].items():
-                if ans:
-                    must_op_str(item,self.a_name)
-                else:
-                    none_op_str(item,self.a_name)
-            for item,ans in self.oplist[self.b_name].items():
-                if ans:
-                    must_op_str(item,self.b_name)
-                else:
-                    none_op_str(item,self.b_name)
-            for bound, diff in self.unknown.items():
-                unkn_op_str(bound, diff)
-            count = 0
-            for item in self.caselist:
-                if item.diff > AnswerList.Threshold:
-                    continue
-                if item.diff == 0:
-                    print("\nCase {}: Exact Match:".format(count))
-                else:
-                    print("\nCase {}: Non-Exact Match with diff {}:".format(count,item.diff))
-                for x in self.oplist[self.a_name].items():
-                    if ans:
-                        must_op_str(item,self.a_name)
-                for x in item.oplist[self.a_name]:
-                    poss_op_str(self.a_name,x)
-                for x in self.oplist[self.b_name].items():
-                    if ans:
-                        must_op_str(item,self.b_name)
-                for x in item.oplist[self.b_name]:
-                    poss_op_str(self.b_name,x)
-                for bound, diff in item.unknown.items():
-                    unkn_op_str(bound, diff)
-                if(AnswerList.Verbose):
-                    print(item.details)
-                    print(item.diff_str)
-                count+=1
-                if count >= AnswerList.Maxcount:
-                    break
-        else:
-            count = 0
-            for case in self.caselist:
-                self.prt_case(case,count)
-                count+=1
-                if case.diff>AnswerList.Threshold:
-                    break
-                if count>=AnswerList.Maxcount:
-                    break

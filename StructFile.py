@@ -126,9 +126,16 @@ def process_dentry_open(r2, r2_id, struct):
     ret.sort()
     return struct.map_list(ret,ls)
 
-def process_StructFile(Msm_r2, Van_r2, Msm_oplist, Van_oplist):
+Struct_vanilla = None
+Struct_msm = None
+
+def init_struct_file(Msm_oplist, Van_oplist):
+    global Struct_vanilla
+    global Struct_msm
     Struct_vanilla = StructFile("vanilla", Van_oplist)
     Struct_msm = StructFile("msm", Msm_oplist)
+
+def process_StructFile(Msm_r2, Van_r2):
     def run_comp(func):
         msm_res = func(Msm_r2, "msm", Struct_msm)
         van_res = func(Van_r2, "vanilla",Struct_vanilla)

@@ -309,7 +309,7 @@ def process_i2c_new_device(r2,r2_id, struct):
 
 def process_device_resume(r2, r2_id, struct):
     print ("processing device_resume...")
-    ls = ['power.is_prepared','pm_domain','type','class','bus','driver','mutex']
+    ls = ['power.is_prepared','pm_domain','type','class','bus','driver','mutex','power.completion']
     tarfunc = "sym.device_resume"
     funclist = FuncRange(tarfunc,None)
     anal_tar_func(r2,r2_id,funclist)
@@ -333,12 +333,11 @@ def process_device_resume(r2, r2_id, struct):
 
 def process_device_initialize(r2, r2_id, struct):
     print("processing device_initialize...")
-    ls = ["devres_head.next","devres_head.prev", "dma_pools.next","dma_pools.prev"]
-    if r2_id == "vanilla":
-        ls+= ["kobj"]
+    ls = ["devres_head.next","devres_head.prev", "dma_pools.next","dma_pools.prev","kobj","kobj.kset","mutex"]
     tarfunc = "sym.device_initialize"
     funclist = FuncRange(tarfunc,None)
     anal_tar_func(r2,r2_id,funclist)
+    #kobj_init = FuncArgs("sym.kobject_init",["r0"])
     rg, rgs = get_search_range_device_initialize(r2,r2_id,funclist)
 
     # hard coded option recovery. ugly as hell
@@ -352,15 +351,19 @@ def process_device_initialize(r2, r2_id, struct):
     if direct_check_op(r2, struct, "sym.pm_runtime_init", "CONFIG_PM_RUNTIME",force=True):
         runtime_flag = True
     if direct_check_op(r2, struct, "sym.__raw_spin_lock_init", "CONFIG_DEBUG_SPINLOCK",force=True):
+        ls+= ['devres_lock']
         spinlock_flag = True
     direct_check_op(r2, struct, "sym.pm_notifier_call_chain","CONFIG_PM_SLEEP",force=True)
 
+    # when device_pm_init is an (inline?) leaf function
     if not "sym.device_pm_init" in ref_funcs:
+        if spinlock_flag:
+            ls+= ['power.lock']
         if "sym.complete_all" in ref_funcs:
-            ls+= ['power.entry.next','power.entry.prev','power.completion','power.is_prepared','power.power_state','power.wakeup']
+            ls+= ['power.entry.next','power.entry.prev','power.completion.wait','power.completion.done','power.is_prepared','power.power_state','power.wakeup']
         else:
             if not runtime_flag:
-                ls+= ['power.power_state', 'power.lock']
+                ls+= ['power.power_state']
 
     # hard code part end. only deal with first part of the code no matter what.
     ret = []
@@ -385,10 +388,16 @@ def process_device_initialize(r2, r2_id, struct):
         struct.oplist.set_option("CONFIG_DEBUG_LOCK_ALLOC",False)
     return ans
 
+Struct_vanilla = None
+Struct_msm = None
 
-def process_StructDevice(Msm_r2, Van_r2, Msm_oplist, Van_oplist):
+def init_struct_device(Msm_oplist, Van_oplist):
+    global Struct_vanilla
+    global Struct_msm
     Struct_vanilla = StructDevice("vanilla", Van_oplist)
     Struct_msm = StructDevice("msm", Msm_oplist)
+
+def process_StructDevice(Msm_r2, Van_r2):
     def run_comp(func):
         msm_res = func(Msm_r2, "msm", Struct_msm)
         van_res = func(Van_r2, "vanilla",Struct_vanilla)
