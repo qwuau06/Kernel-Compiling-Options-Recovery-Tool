@@ -11,7 +11,7 @@ import argparse
 
 from StructDevice import process_StructDevice, init_struct_device
 from StructFile import process_StructFile, init_struct_file
-from Structs import OptionList
+from OptionList import OptionList
 from AnswerList import AnswerList   
 from utils import *
 

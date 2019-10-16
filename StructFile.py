@@ -1,7 +1,8 @@
 import r2pipe
 
 from utils import *
-from Structs import StructBase, OptionList, spinlock_t, listhead_t
+from Structs import StructBase, spinlock_t, listhead_t
+from OptionList import OptionList
 
 class StructFile(StructBase):
     Members = [
