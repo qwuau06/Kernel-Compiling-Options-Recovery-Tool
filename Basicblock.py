@@ -24,13 +24,13 @@ class Basicblock:
     def __str__(self):
         return hex(self.start)
 
-    def __init__(self, item, addrs):
+    def __init__(self, item): #, addrs):
         self.json_src = item
 
         self.start = item['addr']
         self.end = item['addr']+item['size']-4 # need to remove the last one  
         self.endblock = False
-        self.subs = [x for x in addrs.keys() if x>=self.start and x<=self.end]
+        #self.subs = [x for x in addrs.keys() if x>=self.start and x<=self.end]
         Basicblock.bb_list[self.start] = self
         
         self.outs = []
