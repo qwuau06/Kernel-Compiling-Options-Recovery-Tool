@@ -155,7 +155,6 @@ class StructDevice(StructBase):
     def populate_oplist(self):
         
         # CONFIG_NUMA doesn't apply for ARM structure even if the option exists
-
         OptionList.Op.FullOp(self, "SMP", ["mutex.wait_list","mutex.__end_mutex__"], 4, ["mutex.owner"], tradable = ['DEBUG_MUTEXES'])
         OptionList.Op.FullOp(self, "DEBUG_MUTEXES", ["mutex.wait_list", "mutex.__end_mutex__"], 12, ["mutex.owner","mutex.name","mutex.magic"])
 

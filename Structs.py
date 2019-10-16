@@ -723,7 +723,10 @@ class Diff:
     def __repr__(self):
         #opls = [y.name for y in self.oplist for x in OptionList.get_option(y).effects if len(x.deps)==0]
         #opls += ["child:"+y.name for y in self.oplist for x in OptionList.get_option(y).effects if len(x.deps)>0]
-        return "\n{}={}:{},{}".format(self.diff,self.expected, self.bounds, self.oplist)
+        ret = "\n{}={}:{},{}".format(self.diff,self.expected, self.bounds, self.oplist)
+        if self.fake:
+            ret += " fake"
+        return ret
 
     def update_diffs_all(*,fake=False,debug=False):
         for cls in Diff.diff_list.keys():
