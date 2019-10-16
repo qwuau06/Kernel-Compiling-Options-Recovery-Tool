@@ -236,7 +236,7 @@ class StructBase:
                 print("possible missing members in {} kernel, between {} and {}, offsets: {}, {}, diff: {}".format(
                     missing, type(self).Members[last_idx], type(self).Members[idx],hex(a),hex(b),true_diff))
                 lastmem = item
-                Diff(self,true_diff,tuple((type(self).Members[last_idx], type(self).Members[idx])),oplist = self.oplist)
+                Diff(type(self),true_diff,tuple((type(self).Members[last_idx], type(self).Members[idx])),oplist = self.oplist)
             else:
                 #print("member registered in both kernel: {}, offset {}, {}.".format(type(self).Members[idx],hex(a), hex(b)))
                 None
@@ -485,13 +485,17 @@ class OptionList:
                         st = another
                     must_op_str(op,st)
                     #diff.expected += op.get_bytes()
-                    op.verified = True
-                    op.set = True
+                    #op.verified = True
+                    #op.set = True
+                    st.set_option(op.name)
+                    print("{} confirmed by round 4.".format(op.name))
                     eff = diff.get_eff(op_a)
                     if len(eff.deps)==1:
                         op = eff.deps[0]
-                        op.verified = True
-                        op.set = True
+                        #op.verified = True
+                        #op.set = True
+                        st.set_option(op.name)
+                        print("{} confirmed by round 4.".format(op.name))
                 else:
                     unkn_op_str(diff)
         # Round 5: more than 2 options but only one option is below diff
@@ -510,8 +514,9 @@ class OptionList:
                     op = st.get_option(opnames[0])
                     must_op_str(op,st)
                     #diff.expected += sign*diff.get_bytes(self.get_option(op))
-                    op.verified = True
-                    op.set = True
+                    #op.verified = True
+                    #op.set = True
+                    st.set_option(op.name)
         Diff.update_diffs(cls)
 
     def calc_options(self, another):
@@ -634,15 +639,16 @@ class OptionList:
                 op.suspected = True
                 op.verified = True
                 op.set = True
-            Diff.update_diffs_all(True)
-            details = ("Post update:...\n{}".format(Diff.get_merged_list()))
-            # add into dict
-            total_diff = 0 
-            diff_str = "debug: "
-            for x_diff in Diff.get_merged_list():
-                total_diff += abs(x_diff.diff-x_diff.expected)
-                diff_str += "{}-{}, ".format(x_diff.diff,x_diff.expected)
-            res_out[flattened_perm] = tuple((total_diff,details,diff_str))
+            Diff.update_diffs_all(fake=True)
+            if Diff.valid_list(cls):
+                details = ("Post update:...\n{}".format(Diff.diff_list))
+                # add into dict
+                total_diff = 0 
+                diff_str = "debug: "
+                for x_diff in Diff.get_merged_list():
+                    total_diff += abs(x_diff.diff-x_diff.expected)
+                    diff_str += "{}-{}, ".format(x_diff.diff,x_diff.expected)
+                res_out[flattened_perm] = tuple((total_diff,details,diff_str))
             # clean up, diff_list will be auto cleaned by next round
             for op in [*perm['a'],*perm['b']]:
                 op.suspected = False
@@ -650,7 +656,7 @@ class OptionList:
                 op.set = False
 
         case = 0
-        #Diff.get_diff_list(cls).append(self)
+        Diff.get_diff_list(cls).append(self)
         for perm, res in sorted(res_out.items(),key=lambda kv:kv[1][0] ):
             if res[0] > AnswerList.Threshold:
                 continue
@@ -676,8 +682,8 @@ class Diff:
     pos_oplist = None
     neg_oplist  = None
     
-    def __init__(self, struct, diff, bounds, oplist=None, fake=False):
-        self.cls = type(struct)
+    def __init__(self, cls, diff, bounds, oplist=None, fake=False):
+        self.cls = cls
         self.diff = diff        # diff
         self.bounds = bounds    # (lower, upper)
         self.oplist = [] # notice it only register the names
@@ -692,13 +698,20 @@ class Diff:
             for op in oplist.ops:
                 if self.option_in_range(op,self.cls):
                     self.oplist.append(op.name)
-        print("New Diff creating: diff:{}, bounds:{}, fake={}".format(self.diff,self.bounds,self.fake))
+        if not self.fake:
+            print("New Diff creating: diff:{}, bounds:{}, fake={}".format(self.diff,self.bounds,self.fake))
             
     def get_diff_list(cls):
         return Diff.diff_list[cls]
 
     def get_merged_list():
         return [x for y in Diff.diff_list.values() for x in y]
+
+    def valid_list(cls):
+        for diff in Diff.get_diff_list(cls):
+            if not diff.fake and abs(diff.expected) > abs(diff.diff):
+                return False
+        return True
 
     def option_in_range(self, option, cls):
         opbound = option.get_eff_list(cls).keys()
@@ -712,18 +725,22 @@ class Diff:
         #opls += ["child:"+y.name for y in self.oplist for x in OptionList.get_option(y).effects if len(x.deps)>0]
         return "\n{}={}:{},{}".format(self.diff,self.expected, self.bounds, self.oplist)
 
-    def update_diffs_all(fake=False):
+    def update_diffs_all(*,fake=False,debug=False):
         for cls in Diff.diff_list.keys():
-            Diff.update_diffs(cls,fake)
+            Diff.update_diffs(cls,fake=fake,debug=debug)
 
     # update diffs after changes in options.
     # TODO:this function should not depend on struct, but currently doesn't have a better way, unless rewriting it.
-    def update_diffs(cls,fake=False): 
+    def update_diffs(cls,*,fake=False,debug=False):
         if Diff.pos_oplist == None or Diff.neg_oplist == None:
             print("please set positive and negetive structs first")
             exit()
         pos_op = Diff.pos_oplist
         neg_op = Diff.neg_oplist
+
+        def dbgprint(*args, **kwargs):
+            if debug:
+                print(*args, **kwargs)
 
         Diff.diff_list[cls] = [df for df in Diff.get_diff_list(cls) if not df.fake]
         for diff in Diff.get_diff_list(cls):
@@ -736,13 +753,13 @@ class Diff:
                     get = lambda x: pos_op.get_option(x)
                     # if dep not satisfied
                     if len(v.deps)>0 and len([x for x in v.deps if get(x).verified and get(x).set])==0:
+                        dbgprint("{} of {} has no effect due to unsatisfied dep.".format(k,op.name))
                         continue
                     # if tradable exists
                     if len(v.tradable)>0 and len([x for x in v.tradable if get(x).verified and get(x).set])>0:
-                        #print("a; op:{}, bound:{}, traded{}".format(op.name, k, v.tradable))
+                        dbgprint("{} of {} has no effect due to existing tradable.".format(k,op.name))
                         continue
-                    elif len(v.tradable)>0:
-                        None
+                    dbgprint("{} of {} takes effect.".format(k,op.name))
                     new_list+= [tuple((k,v.bytes))]
                 if op.suspected:
                     delete_flag = False
@@ -752,13 +769,13 @@ class Diff:
                     get = lambda x: neg_op.get_option(x)
                     # if dep not satisfied
                     if len(v.deps)>0 and  len([x for x in v.deps if get(x).verified and get(x).set])==0:
+                        dbgprint("{} of {} has no effect due to unsatisfied dep.".format(k,op.name))
                         continue
                     # if tradable exists
                     if len(v.tradable)>0 and len([x for x in v.tradable if get(x).verified and get(x).set])>0:
-                        #print("b; op:{}, bound:{}, traded{}".format(op.name, k, v.tradable))
+                        dbgprint("{} of {} has no effect due to existing tradable.".format(k,op.name))
                         continue
-                    elif len(v.tradable)>0:
-                        None
+                    dbgprint("{} of {} takes neg effect.".format(k,op.name))
                     new_list+= [tuple((k,-v.bytes))]
                 if op.suspected:
                     delete_flag = False
@@ -770,13 +787,18 @@ class Diff:
                 if cls.range_in_range(bounds, diff.bounds):
                     flag = True
                     diff.expected += extrabytes
+                    dbgprint("After:{} gained {} bytes.".format(diff.bounds, extrabytes))
             if not flag:
                 new_diff_flag = True
                 for diff in Diff.get_diff_list(cls):
                     if cls.range_in_range(diff.bounds,bounds):
+                        dbgprint("After:{} gained {} bytes.".format(diff.bounds, extrabytes))
                         new_diff_flag = False
+                        diff.expected += extrabytes
                 if new_diff_flag:
-                    Diff(-extrabytes, bounds, pos_op, fake=fake)
+                    Diff(cls,-extrabytes, bounds, pos_op, fake=True)
+                    dbgprint("New gap {} created with {}.".format(bounds,-extrabytes))
+        Diff.diff_list[cls] = [x for x in Diff.get_diff_list(cls) if not (x.fake and x.diff == x.expected)]
 #        if delete_flag:
 #            Diff.get_diff_list(cls) = [x for x in Diff.get_diff_list(cls) if x.diff != x.expected]
 

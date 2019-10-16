@@ -163,11 +163,11 @@ class StructDevice(StructBase):
         OptionList.Op.FullOp(self, "CMA", ["dma_mem","archdata"], 4, ["cma_area"])
         OptionList.Op.FullOp(self, "(archdata.dma_ops)", ["archdata","of_node"], 4, ["dma_ops"])
 
-        OptionList.Op.FullOp(self, "PM_SLEEP", ["power.entry","power.should_wakeup"], 24,
+        OptionList.Op.FullOp(self, "PM_SLEEP", ["power.entry","pm_domain"], 24,
                 ["power.entry","power.completion","power.wakeup","power.wakeup_path"], antimems=["power.should_wakeup"])
 
         subs = StructDevice.Members[ StructDevice.Members.index("power.suspend_timer"): StructDevice.Members.index("power.pq_req")+1 ] 
-        OptionList.Op.FullOp(self, "PM_RUNTIME", ["power.suspend_timer","power.subsys_data"],120,subs) 
+        OptionList.Op.FullOp(self, "PM_RUNTIME", ["power.suspend_timer","pm_domain"],120,subs) 
 
         OptionList.Op.FullOp(self,"DMABOUNCE", ["dma_mem", "of_node"] , 4, ["archdata.dmabounce"] )
         OptionList.Op.FullOp(self,"IOMMU_API", ["dma_mem", "of_node"] , 4, ["archdata.iommu"] )
