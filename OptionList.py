@@ -159,9 +159,12 @@ class OptionList:
 
     def check_option(self,opname):
         op = self.get_option(opname)
-        if op.set and op.verified and not op.suspected:
-            return True
-        return False
+        if op.verified and not op.suspected:
+            if op.set:
+                return 1
+            else:
+                return 0
+        return -1
 
     # core function
     # this function is only used from vanilla to msm, diff is offset of msm-vanilla

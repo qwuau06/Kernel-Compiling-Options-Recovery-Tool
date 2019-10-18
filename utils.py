@@ -4,10 +4,20 @@ import re
 
 from Basicblock import Basicblock
 
+class FuncArgs:
+    def __init__(self, funcName, arglist, ret=True):
+        self.name = funcName
+        self.args = arglist
+        self.ret = ret
+
 class FuncRange:
     def __init__(self,FuncTar,subflags):
         self.FuncTar = FuncTar
         self.SubFlags = subflags 
+
+def r2dbgprt(r2,s):
+    print("debug print: {}".format(s))
+    print(r2.cmd(s).strip())
 
 def anal_tar_func(r2, r2_id, funclist):
     FuncTar = funclist.FuncTar
@@ -53,7 +63,8 @@ class Sim_ESIL(object):
     def __enter__(self):
         frags = self.instr.strip().split(' ')
         if self.name not in frags[0]:
-            print("Error: not strex command")
+            print(self.instr)
+            print("Error: not {} command".format(self.name))
             import traceback
             traceback.print_stack()
             exit()
@@ -62,48 +73,87 @@ class Sim_ESIL(object):
         has_off = False
         if "[" not in frags[-1]:
             has_off = True
-        for item in frags:
-            item.strip(',')
-            item.strip('[')
-            item.strip(']')
-        return frags, has_off, cond
+        frags[:] = [x.strip(',').strip('[').strip(']')  for x in frags]
+        return tuple((frags, has_off, cond))
 
     def __exit__(self):
         None
 
 
 def sim_esil_strex(r2, instr):
-    with Sim_ESIL(instr, "strex") as frags, has_off, cond:
+    with Sim_ESIL(instr, "strex") as properties:
+        frags = properties[0]
+        has_off = properties[1]
+        cond = properties[2]
         esil_cmd = None
         if not has_off:
-            esil_cmd = "{},{},{},+,0xffffffff,&,=[4]".format(frags[1], frags[3], frags[2])
-        else:
             esil_cmd = "{},{},0xffffffff,&,=[4]".format(frags[1], frags[2])
+        else:
+            esil_cmd = "{},{},{},+,0xffffffff,&,=[4]".format(frags[1], frags[3], frags[2])
         if len(cond)>0:
             if cond == "eq":
                 esil_cmd = "zf,?{{,{},}}".format(esil_cmd)
             elif cond == "ne":
                 esil_cmd = "zf,!,?{{,{},}}".format(esil_cmd)
-        r2.cmd("ae {}".format(esil_cmd))
+        esil_cmd = "ae "+esil_cmd
+        r2.cmd(esil_cmd)
         r2.cmd("aer {}=0".format(frags[0]))
 
-def sim_esil_strd(r2, instr):
-    with Sim_ESIL(instr, "strd") as frags, has_off, cond:
+def sim_esil_ldrex(r2, instr):
+    # ldr r2, [r3, 4]
+    with Sim_ESIL(instr, "ldrex") as properties:
+        frags = properties[0]
+        has_off = properties[1]
+        cond = properties[2]
         esil_cmd = None
         if not has_off:
-            esil_cmd = "{},{},0xffffffff,&,=[4],{},4,{},+,0xffffffff,&,=[4]".format(frags[0],frags[2],frags[1],frags[2])
+            esil_cmd = "{},0xffffffff,&,[4],0xffffffff,&,{},=".format(frags[1],frags[0])
         else:
-            esil_cmd = "{},{},{},+,0xffffffff,&,=[4],{},4,{},+,{},+,0xffffffff,&,=[4]".format(frags[0],frags[3],frags[2],frags[1],frags[3],frags[2])
-        r2.cmd("ae {}".format(esil_cmd))
+            esil_cmd = "{},{},+,0xffffffff,&,[4],0xffffffff,&,{},=".format(frags[2],frags[1],frags[0])
+        if len(cond)>0:
+            if cond == "eq":
+                esil_cmd = "zf,?{{,{},}}".format(esil_cmd)
+            elif cond == "ne":
+                esil_cmd = "zf,!,?{{,{},}}".format(esil_cmd)
+        esil_cmd = "ae "+esil_cmd
+        r2.cmd(esil_cmd)
+
+def sim_esil_strd(r2, instr):
+    with Sim_ESIL(instr, "strd") as properties:
+        frags = properties[0]
+        has_off = properties[1]
+        cond = properties[2]
+        esil_cmd = None
+        #esil_cmd0 = None
+        #esil_cmd1 = None
+        if not has_off:
+            esil_cmd = "ae {},{},0xffffffff,&,=[4],{},4,{},+,0xffffffff,&,=[4]".format(frags[0],frags[2],frags[1],frags[2])
+            #esil_cmd0 = "{},{},0xffffffff,&,=[4]".format(frags[0],frags[2])
+            #esil_cmd1 = "{},4,{},+,0xffffffff,&,=[4]".format(frags[1],frags[2])
+        else:
+            esil_cmd = "ae {},{},{},+,0xffffffff,&,=[4],{},4,{},+,{},+,0xffffffff,&,=[4]".format(frags[0],frags[3],frags[2],frags[1],frags[3],frags[2])
+            #off = int(frags[3],16)
+            #esil_cmd0 = "{},{},{},+,0xffffffff,&,=[4]".format(frags[0],off,frags[2])
+            #esil_cmd1 = "{},{},{},+,0xffffffff,&,=[4]".format(frags[1],off+4,frags[2])
+        r2dbgprt(r2,"aer {}".format(frags[2]))
+        r2dbgprt(r2,"aer {}".format(frags[0]))
+        #r2.cmd("ae {}".format(esil_cmd0))
+        print(esil_cmd)
+        r2dbgprt(r2,"aer {}".format(frags[2]))
+        r2dbgprt(r2,"aer {}".format(frags[0]))
+        r2.cmd(esil_cmd)
 
 def sim_esil_ldrd(r2, instr):
-    with Sim_ESIL(instr, "ldrd") as frags, has_off, cond:
+    with Sim_ESIL(instr, "ldrd") as properties:
+        frags = properties[0]
+        has_off = properties[1]
+        cond = properties[2]
         esil_cmd = None
         if not has_off:
-            esil_cmd = "{},0xffffffff,&,[4],0xffffffff,&,{},=,{},4,+,0xffffffff,&,[4],0xffffffff,&,{},=".format(frags[2],frags[0],frags[2],frags[1])
+            esil_cmd = "ae {},0xffffffff,&,[4],0xffffffff,&,{},=,{},4,+,0xffffffff,&,[4],0xffffffff,&,{},=".format(frags[2],frags[0],frags[2],frags[1])
         else:
-            esil_cmd = "{},{},+,0xffffffff,&,[4],0xffffffff,&,{},=,{},{},+,4,+,0xffffffff,&,[4],0xffffffff,&,{},=".format(frags[2],frags[3],frags[0],frags[2],frags[3],frags[1])
-        r2.cmd("ae {}".format(esil_cmd))
+            esil_cmd = "ae {},{},+,0xffffffff,&,[4],0xffffffff,&,{},=,{},{},+,4,+,0xffffffff,&,[4],0xffffffff,&,{},=".format(frags[2],frags[3],frags[0],frags[2],frags[3],frags[1])
+        r2.cmd(esil_cmd)
 
 #=================================================================
 
@@ -161,8 +211,8 @@ def set_flag_at(r2, bit, val=1):
 def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
     r2.cmd("s {}".format(starting_addr))
     #range_str=Range_str.format(rg[0],rg[1])
-    Magic = "0x001DDDD"
-    Garbage = "0x00100EE"
+    Magic = "0x0010DDDD"
+    Garbage = "0x00100EEE"
     ZF = 30
     
     lmbd = lambda ret: json.dumps([t for x in ret for t in json.loads(x or "[]")])
@@ -176,6 +226,7 @@ def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
     # due to incomplete ESIL code, these needs to be manually implemented.
     # strd and ldrd as two-step ESILs; strex as normal str + mov
     list_strex = json.loads(r2search(r2, rg, "/cj strex",proc=lmbd) or "[]")
+    list_ldrex = json.loads(r2search(r2, rg, "/cj ldrex",proc=lmbd) or "[]")
     list_strd = json.loads(r2search(r2, rg, "/cj strd",proc=lmbd) or "[]")
     list_ldrd = json.loads(r2search(r2, rg, "/cj ldrd",proc=lmbd) or "[]")
 
@@ -185,48 +236,44 @@ def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
     #target_ldr_json = r2.cmd(range_str+"/cj ldr").strip()
     addrs = {}
     offsets_head = {}
-    reg_pattern = re.compile('(r\d{1,2})')
+    reg_pattern = re.compile('(r\d{1,2}|sb)')
+    off_pattern = re.compile('\[(.*)\]')
+    other_pattern = re.compile('\w+ (.*)\[')
 
     branchs = [item['offset'] for item in json.loads(branchs_json)]
     skips = [item['offset'] for item in json.loads(skips_json)]
+
+    def proc_json(item, addrs, offsets_head, *, proc_regs=lambda x,y:[x,y[0]], ):
+        offset = item['offset']
+        string = item['code']
+        tar = re.findall(off_pattern, string)[0].strip().split(', ')
+        reg_offset = 0
+        rn = None
+        if len(tar)==2:
+            reg_offset = int(tar[1].strip(),16)
+        if len(tar)>0:
+            rn = tar[0].strip()
+        list_rts = re.findall(other_pattern, string)[0].split(', ')
+        list_rts = [x for x in list_rts if x!=""]
+        for x in list_rts:
+            if re.match(reg_pattern,x) == None:
+                print(list_rts)
+                print("Detected non-reg in instr at 0x{:x}".format(offset))
+                import traceback
+                traceback.print_stack()
+                exit()
+        regs = proc_regs(rn,list_rts)
+        offsets_head[offset] = reg_offset
+        addrs[offset] = regs # str r0, [r1]: store r0 into place of r1
+
     for item in json.loads(target_str_json):
         if item in list_strex or item in list_strd:
             continue
-        offset = item['offset']
-        string = item['code']
-        reses = re.findall(reg_pattern, string)
-        offset_head_str = string.split(',')[-1].strip()
-        # TODO: properly deal with write back
-        if offset_head_str[-1]=='!':
-            offset_head_str = offset_head_str[0:-1]
-        if offset_head_str[-1]==']':
-            offset_head_str = offset_head_str[0:-1]
-        offset_head = int(offset_head_str,16)
-        if len(reses)<2:
-            print("Not enough regs in str instr at 0x{:x}, skip.".format(offset))
-            reses.append("blank")
-            #exit()
-        addrs[offset] = reses # str r0, [r1]: store r0 into place of r1
-        offsets_head[offset] = offset_head
+        proc_json(item, addrs, offsets_head)
     for item in json.loads(target_ldr_json):
-        if item in list_ldrd:
+        if item in list_ldrex or item in list_ldrd:
             continue
-        offset = item['offset']
-        string = item['code']
-        reses = re.findall(reg_pattern, string)
-        offset_head_str = string.split(',')[-1].strip()
-        # TODO: properly deal with write back
-        if offset_head_str[-1]=='!':
-            offset_head_str = offset_head_str[0:-1]
-        if offset_head_str[-1]==']':
-            offset_head_str = offset_head_str[0:-1]
-        offset_head = int(offset_head_str,16)
-        if len(reses)<2:
-            print("not enough regs in ldr instr at 0x{:x}. Skipping...".format(offset))
-            reses.append("pc")
-            #exit()
-        addrs[offset] = reses # ldr r0, [r1]: load content of r1 into r0
-        offsets_head[offset] = offset_head
+        proc_json(item, addrs, offsets_head, proc_regs=lambda x,y:[x,"blank"])
     for item in json.loads(target_add_json):
         offset = item['offset']
         string = item['code']
@@ -241,20 +288,27 @@ def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
         addrs[offset] = reses # ldr r0, [r1]: load content of r1 into r0
         offsets_head[offset] = offset_head
 
+    special_list = {}
+    special_instr = {}
     # TODO: temporary solutions here. updates may clear it up.
-    #for item in list_strex:
-    #    offset = item['offset']
-    #    string = item['code']
-    #    reses = re.findall(reg_pattern, string)
-    #    offset_head_str = string.split(',')[-1].strip()
-    #    # TODO: properly deal with write back
-    #    offset_head = int(offset_head_str,16)
-    #    if len(reses)<3:
-    #        print("not enough regs in add instr at 0x{:x}. Skipping...".format(offset))
-    #        reses.append("pc")
-    #        #exit()
-    #    addrs[offset] = reses
-    #    offsets_head 
+#    for item in list_strex:
+#        proc_json(item, addrs, offsets_head, proc_regs=lambda x,y: [x, y[1]])
+#        special_list[item['offset']] = 0
+#        special_instr[item['offset']] = item['code']
+#    for item in list_ldrex:
+#        proc_json(item, addrs, offsets_head)
+#        special_list[item['offset']] = 1
+#        special_instr[item['offset']] = item['code']
+    for item in list_strd:
+        proc_json(item, addrs, offsets_head)
+#        special_list[item['offset']] = 2
+#        special_instr[item['offset']] = item['code']
+    for item in list_ldrd:
+        proc_json(item, addrs, offsets_head)
+        special_list[item['offset']] = 3
+        special_instr[item['offset']] = item['code']
+
+    special_act = [sim_esil_strex, sim_esil_ldrex, sim_esil_strd, sim_esil_ldrd]
 
     merged_list = {}
     for item in skips:
@@ -264,6 +318,7 @@ def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
 
     for item in addrs.keys():
         merged_list[item] = 2
+
 
     # debug print merged_list
     for item in merged_list.keys():
@@ -303,21 +358,18 @@ def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
 
     def init_env(tar_reg):
         Basicblock.init()
-        setup_str = "aei;aeim;s {};aeip;".format(rg[0])
+        setup_str = "aer0;aei;aeim 0x100000 0xf0000 free_space;s {};aeip;".format(rg[0])
         args_info = json.loads(r2.cmd("afvj").strip())
 
         active_reg_list.append(tar_reg)
 
         r2.cmd(setup_str)
         for item in args_info['reg']:
-            if item['ref'] == tar_reg:
-                r2.cmd("aer {}={}".format(item['ref'],Magic))
-            else:
-                r2.cmd("aer {}={}".format(item['ref'],Garbage))
+            r2.cmd("aer {}={}".format(item['ref'],Garbage))
         r2.cmd("aer {}={}".format(tar_reg,Magic))
 
     def reset_env():
-        reset_str = "aer0;aeim-;aei-;"
+        reset_str = "aeim-;aei-;"
         r2.cmd(reset_str)
     
     valid_offset_list = []
@@ -362,8 +414,8 @@ def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
                                 for reg_name in func_arg_tar.args:
                                     off_chr = r2.cmd("aer {}".format(reg_name)).strip()
                                     off = int(off_chr,16)-Magic_val
-                                    print("arg hit 0x{:x} of function {} at {}; orig {}".format(off, func_arg_tar.name, r2.cmd("aer pc").strip(),off_chr))
                                     if off not in valid_offset_list:
+                                        print("arg hit 0x{:x} of function {} at {}; orig {}".format(off, func_arg_tar.name, r2.cmd("aer pc").strip(),off_chr))
                                         valid_offset_list.append(off)
                             r2.cmd("aess")
                             # by default we assume every function has a return value which is not of interest
@@ -385,6 +437,23 @@ def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
                     record = True
                 elif merged_list[inter] == 2:
                     # hit
+#                    list_regval = []
+#                    for reg in addrs[inter]:
+#                        reg_val = int(r2.cmd("aer {}".format(reg)).strip(),16)
+#                        list_regval.append(reg_val)
+#                    off_from = None
+#                    for other_off in [0]+valid_offset_list:
+#                        known_mem = Magic_val + other_off
+#                        if known_mem in list_regval:
+#                            off_from = other_off
+#                            break
+#                    if off_from != None:
+#                        prt = "hit 0x{:x}: ".format(inter)
+#                        for idx in range(len(list_regval)):
+#                            prt += "{}={}. ".format(addrs[inter][idx], list_regval[idx])
+#                        print(prt)
+#                        valid_list.append(inter)
+#                        off = offsets_head[inter]+off_from
                     cur_val0 = int(r2.cmd("aer {}".format(addrs[inter][0])).strip(),16) # if the target reg contains Magic
                     cur_val1 = int(r2.cmd("aer {}".format(addrs[inter][1])).strip(),16) # if the target reg contains Magic
                     off_from = None
@@ -394,13 +463,21 @@ def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
                             off_from = other_off
                             break
                     if off_from != None:
-                        print("hit 0x{:x}: {}={}. {}={}".format(inter,(addrs[inter][0]),hex(cur_val0),(addrs[inter][1]),hex(cur_val1)))
                         valid_list.append(inter)
                         off = offsets_head[inter]+off_from
+                        print("hit 0x{:x}: {}={}. {}={}, off=0x{:x}".format(inter,(addrs[inter][0]),hex(cur_val0),(addrs[inter][1]),hex(cur_val1),offsets_head[inter]))
                         if off not in valid_offset_list:
                             valid_offset_list.append(off)
                     merged_list[inter] = 9 # mark as visited
-                    r2.cmd("aes")
+#                    cur_instr = r2.cmd("ao 1").split('\n')[1].split(':')[1].strip()
+#                    cur_opcode = cur_instr.split(' ')[0]
+                    if inter not in special_list.keys():
+                        r2.cmd("aes")
+                    else:
+                        r2.cmd("aess")
+                        special_act[special_list[inter]](r2,special_instr[inter])
+#                    if "ldr" in cur_instr:
+#                        r2.cmd("aer {}={}".format(addrs[inter][1],Garbage))
                 elif merged_list[inter] == 3:
                     # exit
                     break

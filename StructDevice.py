@@ -309,16 +309,17 @@ def process_i2c_new_device(r2,r2_id, struct):
 
 def process_device_resume(r2, r2_id, struct):
     print ("processing device_resume...")
-    ls = ['power.is_prepared','pm_domain','type','class','bus','driver','mutex','power.completion']
+    ls = ['power.is_prepared','pm_domain','type','class','bus','driver','power.completion','parent']
     tarfunc = "sym.device_resume"
     funclist = FuncRange(tarfunc,None)
     anal_tar_func(r2,r2_id,funclist)
+    mutex_init = FuncArgs("sym.mutex_lock",["r0"])
     rg = get_search_range_device_resume(r2,r2_id,funclist)
     if rg[0]==-1:
         # function not present
         return True
     
-    iters = esil_exec_all_branch(r2,rg,rg[0])
+    iters = esil_exec_all_branch(r2,rg,rg[0],func_arg_list = [mutex_init])
     ret = iters("r0")
     while ret[0]==False:
         ret = iters("r0")
@@ -337,7 +338,7 @@ def process_device_initialize(r2, r2_id, struct):
     tarfunc = "sym.device_initialize"
     funclist = FuncRange(tarfunc,None)
     anal_tar_func(r2,r2_id,funclist)
-    #kobj_init = FuncArgs("sym.kobject_init",["r0"])
+    kobj_init = FuncArgs("sym.kobject_init",["r0"])
     rg, rgs = get_search_range_device_initialize(r2,r2_id,funclist)
 
     # hard coded option recovery. ugly as hell
@@ -367,7 +368,7 @@ def process_device_initialize(r2, r2_id, struct):
 
     # hard code part end. only deal with first part of the code no matter what.
     ret = []
-    iters = esil_exec_all_branch(r2,rgs,rg[0])
+    iters = esil_exec_all_branch(r2,rgs,rg[0],func_arg_list=[kobj_init])
     ret = iters("r0")
     print([hex(x) for x in ret[1]])
     ret = ret[1]

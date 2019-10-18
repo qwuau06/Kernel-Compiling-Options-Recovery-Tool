@@ -82,5 +82,5 @@ def init():
 if __name__ == "__main__":
     init()
     process_StructDevice(Msm_r2, Van_r2)
-    #process_StructFile(Msm_r2, Van_r2)
+    process_StructFile(Msm_r2, Van_r2)
     Msm_oplist.calc_options(Van_oplist)

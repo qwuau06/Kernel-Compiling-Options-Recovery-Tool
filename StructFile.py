@@ -53,7 +53,7 @@ class StructFile(StructBase):
             "__end_owner__"
             ]
     SubMembers["f_owner.lock"]=[
-            "raw_lock",       # CONFIG_DEBUG_SPINLOCK || CONFIG_SMP: 4
+            "raw_lock",       # 4
             "break_lock",     # CONFIG_GENERIC_LOCKBREAK: 4
             "magic",          # CONFIG_DEBUG_SPINLOCK: 4
             "owner_cpu",      # CONFIG_DEBUG_SPINLOCK: 4
@@ -73,9 +73,9 @@ class StructFile(StructBase):
             "__end_ra__"
             ]
 
-    PaddingList=[
+    PaddingList={
             # Empty
-            ]
+            }
 
     def __init__(self,name,oplist):
         super().__init__(name,oplist)
@@ -86,8 +86,8 @@ class StructFile(StructBase):
         OptionList.Op.FullOp(self, "SECURITY", ["f_version","private_data"], 4, ["f_security"])
         OptionList.Op.FullOp(self, "EPOLL", ["private_data","f_mapping"], 16, ["f_ep_links", "f_file_llink"])
         OptionList.Op.FullOp(self, "DEBUG_WRITECOUNT", ["f_mapping","__end__"], 4, ["f_mnt_write_state"])
-        OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 16, ["f_owner.lock.raw_lock", "f_owner.lock.magic", "f_owner.lock.owner_cpu","f_owner.lock.owner"])
-        OptionList.Op.FullOp(self, "SMP", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 4, ["f_owner.lock.raw_lock"], tradable = ["DEBUG_SPINLOCK"])
+        # padding compensation, better less than more
+        OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 8, ["f_owner.lock.magic", "f_owner.lock.owner_cpu","f_owner.lock.owner"])
         OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", ["f_op","f_count"], 16, ["f_lock.rlock.raw_lock", "f_lock.rlock.magic", "f_lock.rlock.owner_cpu","f_lock.rlock.owner"])
         OptionList.Op.FullOp(self, "SMP", ["f_op","f_count"], 4, ["f_lock.rlock.raw_lock"], tradable = ["DEBUG_SPINLOCK"])
 
@@ -107,9 +107,27 @@ class StructFile(StructBase):
 def get_search_range_dentry_open(r2, r2_id, funclist):
     return get_search_range(r2,r2_id,funclist)
 
+def get_search_range_file_sb_list_add(r2, r2_id, funclist):
+    return get_search_range(r2,r2_id,funclist)
+    
+def process_file_sb_list_add(r2, r2_id, struct):
+    print("processing file_sb_list_add...")
+    ls = ['f_u.fu_list']
+    tarfunc = "sym.file_sb_list_add"
+    funclist = FuncRange(tarfunc,None)
+    anal_tar_func(r2,r2_id,funclist)
+    rg = get_search_range_file_sb_list_add(r2,r2_id,funclist)
+    if rg[0]==-1:
+        # function not present
+        return True
+    
+    ret = []
+    return struct.map_list(ret,ls)
+
+
 def process_dentry_open(r2, r2_id, struct):
     print("processing __dentry_open...")
-    ls = ['f_mode','f_mapping','f_path.dentry','f_path.mnt','f_flags','f_pos','f_op','f_mnt_write_state']
+    ls = ['f_mode','f_mapping','f_path.dentry','f_path.mnt','f_flags','f_ra','f_op','f_pos']
     tarfunc = "sym.__dentry_open.isra"
     tarfunc = r2.cmd("fs symbols;f~{}".format(tarfunc)).strip().split(' ')[2]
     funclist = FuncRange(tarfunc,None)
@@ -118,13 +136,16 @@ def process_dentry_open(r2, r2_id, struct):
     if rg[0]==-1:
         # function not present
         return True
-    
+
     iters = esil_exec_all_branch(r2,rg,rg[0])
     ret = iters("r2")
     while ret[0]==False:
         ret = iters("r2")
     ret = ret[1]
     ret.sort()
+    if len(ret)-len(ls)==1:
+        ls+=['f_mnt_write_state']
+        struct.oplist.set_option('CONFIG_DEBUG_WRITECOUNT')
     return struct.map_list(ret,ls)
 
 Struct_vanilla = None
@@ -144,6 +165,7 @@ def process_StructFile(Msm_r2, Van_r2):
         if msm_res == False or van_res == False:
             print("Offset processing failed. Exiting...")
             exit()
+    #run_comp(process_file_sb_list_add)
     run_comp(process_dentry_open)
 
     # the actual comparing

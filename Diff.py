@@ -26,6 +26,8 @@ class Diff:
             print("New Diff creating: diff:{}, bounds:{}, fake={}".format(self.diff,self.bounds,self.fake))
             
     def get_diff_list(cls):
+        if cls not in Diff.diff_list:
+            Diff.diff_list[cls] = []
         return Diff.diff_list[cls]
 
     def get_merged_list():
