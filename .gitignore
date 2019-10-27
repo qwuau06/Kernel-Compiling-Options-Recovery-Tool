@@ -11,3 +11,4 @@ results
 results/*
 test_asm
 test_asm/*
+.alt.toml

@@ -61,6 +61,8 @@ def parse_args():
     if(Van_r2==None):
         print("Error: vanilla kernel read failed.")
         exit()
+    ver = use_version(Msm_r2)
+    print("detected r2 version: {}".format(ver))
     AnswerList.Verbose = args.verbose
     AnswerList.Threshold = args.threshold
     AnswerList.Maxcount = args.count

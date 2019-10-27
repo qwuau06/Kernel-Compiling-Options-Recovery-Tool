@@ -220,10 +220,12 @@ class StructDevice(StructBase):
 
 
 def get_search_range_i2c_0(r2, r2_id,funclist):
+    global cej_str
     start,end = get_search_range(r2,r2_id,funclist)
     FuncTarSubs = funclist.SubFlags
     range_str= Range_str.format(start,end)
-    esil_str = lambda s : range_str+"/cej pc,lr,=,{},pc,=".format(s)
+    _,cej_str,_ = use_version(r2)
+    esil_str = lambda s : range_str+cej_str+"pc,lr,=,{},pc,=".format(s)
     
     fret = []
     for pairs in FuncTarSubs:

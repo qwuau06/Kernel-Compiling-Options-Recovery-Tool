@@ -4,6 +4,22 @@ import re
 
 from Basicblock import Basicblock
 
+cej_str = None
+cj_str = None
+
+# assume same r2 ver is used for two sessions. (almost always the case)
+def use_version(r2):
+    global cej_str
+    global cj_str
+    ret = json.loads(r2.cmd("?Vj").strip())['nversion']
+    if ret > 30600:
+        cej_str = "/aej "
+        cj_str = "/aaj "
+    else:
+        cej_str = "/cej "
+        cj_str = "/cj "
+    return ret, cej_str, cj_str
+
 class FuncArgs:
     def __init__(self, funcName, arglist, ret=True):
         self.name = funcName
@@ -172,8 +188,9 @@ def r2search(r2, rg, search_cmd, proc=lambda ret: [i for j in ret for i in j]):
     return None
 
 def search_esil(r2, rg, esil_search, proc = lambda x:x):
+    global cej_str
     print("searching for instructions...")
-    esil_str = "/cej "+esil_search
+    esil_str = cej_str+esil_search
     
     ret = r2search(r2, rg, esil_str, proc=lambda x:x)
     if len(ret[0])<=2:
@@ -209,6 +226,8 @@ def set_flag_at(r2, bit, val=1):
     
 #=================================================================
 def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
+    global cej_str
+    global cj_str
     r2.cmd("s {}".format(starting_addr))
     #range_str=Range_str.format(rg[0],rg[1])
     Magic = "0x0010DDDD"
@@ -217,23 +236,23 @@ def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
     
     lmbd = lambda ret: json.dumps([t for x in ret for t in json.loads(x or "[]")])
     print("scanning target analysis addresses...")
-    branchs_json = r2search(r2, rg, "/cej ,pc,=,}",proc=lmbd) or "[]"
-    skips_json = r2search(r2, rg, "/cej pc,lr,=",proc=lmbd) or "[]"
-    target_str_json = r2search(r2, rg, "/cj str",proc=lmbd) or "[]"
-    target_ldr_json = r2search(r2, rg, "/cj ldr",proc=lmbd) or "[]"
-    target_add_json = r2search(r2, rg, "/cj add",proc=lmbd) or "[]"
+    branchs_json = r2search(r2, rg, cej_str+",pc,=,}",proc=lmbd) or "[]"
+    skips_json = r2search(r2, rg, cej_str+"pc,lr,=",proc=lmbd) or "[]"
+    target_str_json = r2search(r2, rg, cj_str+"str",proc=lmbd) or "[]"
+    target_ldr_json = r2search(r2, rg, cj_str+"ldr",proc=lmbd) or "[]"
+    target_add_json = r2search(r2, rg, cj_str+"add",proc=lmbd) or "[]"
 
     # due to incomplete ESIL code, these needs to be manually implemented.
     # strd and ldrd as two-step ESILs; strex as normal str + mov
-    list_strex = json.loads(r2search(r2, rg, "/cj strex",proc=lmbd) or "[]")
-    list_ldrex = json.loads(r2search(r2, rg, "/cj ldrex",proc=lmbd) or "[]")
-    list_strd = json.loads(r2search(r2, rg, "/cj strd",proc=lmbd) or "[]")
-    list_ldrd = json.loads(r2search(r2, rg, "/cj ldrd",proc=lmbd) or "[]")
+    list_strex = json.loads(r2search(r2, rg, cj_str+"strex",proc=lmbd) or "[]")
+    list_ldrex = json.loads(r2search(r2, rg, cj_str+"ldrex",proc=lmbd) or "[]")
+    list_strd = json.loads(r2search(r2, rg, cj_str+"strd",proc=lmbd) or "[]")
+    list_ldrd = json.loads(r2search(r2, rg, cj_str+"ldrd",proc=lmbd) or "[]")
 
-    #branchs_json = r2.cmd(range_str+"/cej ,pc,=,}").strip()
-    #skips_json = r2.cmd(range_str+"/cej pc,lr,=").strip()
-    #target_str_json = r2.cmd(range_str+"/cj str").strip()
-    #target_ldr_json = r2.cmd(range_str+"/cj ldr").strip()
+    #branchs_json = r2.cmd(range_str+cej_str+",pc,=,}").strip()
+    #skips_json = r2.cmd(range_str+cej_str+"pc,lr,=").strip()
+    #target_str_json = r2.cmd(range_str+cj_str+"str").strip()
+    #target_ldr_json = r2.cmd(range_str+cj_str+"ldr").strip()
     addrs = {}
     offsets_head = {}
     reg_pattern = re.compile('(r\d{1,2}|sb)')
@@ -348,7 +367,7 @@ def esil_exec_all_branch(r2, rg, starting_addr, func_arg_list=[]):
     print("generate map done")
     #Basicblock.print_map()
 
-    #endpoint_json = r2search(r2, rg, "/cej sp,+=", proc=lambda x:x[0])
+    #endpoint_json = r2search(r2, rg, cej_str+"sp,+=", proc=lambda x:x[0])
     #endpoint = json.loads(endpoint_json)[0]['offset']
     endpoints = Basicblock.get_all_ends()
     for item in endpoints:
