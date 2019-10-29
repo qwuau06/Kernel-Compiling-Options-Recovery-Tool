@@ -258,7 +258,8 @@ class OptionList:
             else:
                 # TODO: remove self ref, and the implication of same options
                 # print(diff.oplist)
-                opnames = [op for op in diff.oplist if diff.get_bytes(self.get_option(op))>0 and diff.get_bytes(self.get_option(op))<=abs(diff.diff)]
+                # gaps for paddings
+                opnames = [op for op in diff.oplist if diff.get_bytes(self.get_option(op))>0 and diff.get_bytes(self.get_option(op))<=(abs(diff.diff)+8)]
                 if len(opnames)==1:
                     sign = 1
                     if diff.diff >0:
@@ -310,6 +311,7 @@ class OptionList:
                 if b_op not in b_list and not(b_op.verified and not b_op.set) and b_op not in b_dep_list:
                     b_list.append(b_op)
         for cls in Diff.diff_list.keys():
+            print("{}:".format(cls.__name__))
             print(Diff.get_diff_list(cls))
                 
         print("first round eradication done.")

@@ -35,7 +35,7 @@ class Diff:
 
     def valid_list(cls):
         for diff in Diff.get_diff_list(cls):
-            if not diff.fake and abs(diff.expected) > abs(diff.diff):
+            if not diff.fake and abs(diff.expected) > (abs(diff.diff)+8): # account for padding diff
                 return False
         return True
 

@@ -87,7 +87,7 @@ class StructFile(StructBase):
         OptionList.Op.FullOp(self, "EPOLL", ["private_data","f_mapping"], 16, ["f_ep_links", "f_file_llink"])
         OptionList.Op.FullOp(self, "DEBUG_WRITECOUNT", ["f_mapping","__end__"], 4, ["f_mnt_write_state"])
         # padding compensation, better less than more
-        OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 8, ["f_owner.lock.magic", "f_owner.lock.owner_cpu","f_owner.lock.owner"])
+        OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 12, ["f_owner.lock.magic", "f_owner.lock.owner_cpu","f_owner.lock.owner"])
         OptionList.Op.FullOp(self, "DEBUG_SPINLOCK", ["f_op","f_count"], 16, ["f_lock.rlock.raw_lock", "f_lock.rlock.magic", "f_lock.rlock.owner_cpu","f_lock.rlock.owner"])
         OptionList.Op.FullOp(self, "SMP", ["f_op","f_count"], 4, ["f_lock.rlock.raw_lock"], tradable = ["DEBUG_SPINLOCK"])
 
