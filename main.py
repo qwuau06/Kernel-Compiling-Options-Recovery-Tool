@@ -28,7 +28,7 @@ def search_ops_in_config(fname):
     print("detected vanilla kernel .config file {}".format(fname))
     oplist_str = [x.name for x in Van_oplist.ops]
     # first clear all
-    for op in Van_oplist.ops:
+    for op in [x for x in Van_oplist.ops if not x.ispadding]:
         Van_oplist.set_option(op.name, False)
     with open(fname) as f:
         for line in f.readlines():

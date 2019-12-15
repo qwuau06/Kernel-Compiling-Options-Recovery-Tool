@@ -101,6 +101,10 @@ class StructFile(StructBase):
         OptionList.Op.FullOp(self, "LOCK_STAT", ["f_owner.lock","f_owner.lock.__end_rwlock__"], 8, [], deps=["DEBUG_LOCK_ALLOC"])
         OptionList.Op.FullOp(self, "LOCK_STAT", ["f_op","f_count"], 8, [], deps=["DEBUG_LOCK_ALLOC"])
 
+        # padding
+        OptionList.Op.FullOp(self, "(+4 f_pos)", ["f_mode","f_pos"], 4, [], ispadding=True)
+        OptionList.Op.FullOp(self, "(+4 f_cred)", ["f_cred","f_ra"], 4, [], ispadding=True)
+
 #========================================================
 
 

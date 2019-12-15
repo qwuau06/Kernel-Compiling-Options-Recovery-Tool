@@ -146,9 +146,9 @@ class StructDevice(StructBase):
 
         # msm has an extra member in archdata
         if name == "msm":
-            self.oplist.set_option("(archdata.dma_ops)",force=True)
+            self.oplist.set_option("(+4 archdata.dma_ops)",force=True)
         else:
-            self.oplist.set_option("(archdata.dma_ops)",False,force=True)
+            self.oplist.set_option("(+4 archdata.dma_ops)",False,force=True)
 
 
 
@@ -159,9 +159,9 @@ class StructDevice(StructBase):
         OptionList.Op.FullOp(self, "SMP", ["mutex.wait_list","mutex.__end_mutex__"], 4, ["mutex.owner"], tradable = ['DEBUG_MUTEXES'])
         OptionList.Op.FullOp(self, "DEBUG_MUTEXES", ["mutex.wait_list", "mutex.__end_mutex__"], 12, ["mutex.owner","mutex.name","mutex.magic"])
 
-        OptionList.Op.FullOp(self, "PINCTRL", ["pm_domain","dma_mask"], 4, ["pins"])
-        OptionList.Op.FullOp(self, "CMA", ["dma_mem","archdata"], 4, ["cma_area"])
-        OptionList.Op.FullOp(self, "(archdata.dma_ops)", ["archdata","of_node"], 4, ["dma_ops"])
+        OptionList.Op.FullOp(self, "PINCTRL (+4 dma_mask)", ["pm_domain","dma_mask"], 4, ["pins"])
+        OptionList.Op.FullOp(self, "CMA (+4 arch_data)", ["dma_mem","archdata"], 4, ["cma_area"])
+        OptionList.Op.FullOp(self, "(+4 archdata.dma_ops)", ["archdata","of_node"], 4, ["dma_ops"])
 
         OptionList.Op.FullOp(self, "PM_SLEEP", ["power.entry","pm_domain"], 24,
                 ["power.entry","power.completion","power.wakeup","power.wakeup_path"], antimems=["power.should_wakeup"])
@@ -213,6 +213,9 @@ class StructDevice(StructBase):
             OptionList.Op.FullOp(self, "LOCKDEP", rg, 16, [], deps = ["PM_RUNTIME"])
             OptionList.Op.FullOp(self, "LOCK_STAT", rg, 8, [], deps = ["LOCKDEP"])
         # finished adding options
+
+        # paddings 
+        OptionList.Op.FullOp(self, "(+4 power)", ["platform_data","power"], 4, [], ispadding=True)
 
         #print(self.oplist.ops)
 

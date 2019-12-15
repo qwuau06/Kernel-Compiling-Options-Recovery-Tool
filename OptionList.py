@@ -41,10 +41,11 @@ class OptionList:
                 return ret
 
         # each option isn't bound to a specific struct, but each effect is, and __init__ is called per effect
-        def __init__(self, name):
+        def __init__(self, name, *, ispadding=False):
             self.name = name
             # {[bound]:{extramems, extrabytes, subs}}
             self._effects = {}
+            self.ispadding = ispadding
 
             self.set = False
             self.verified = False
@@ -54,8 +55,8 @@ class OptionList:
             return dict.fromkeys([x[0] for x in self._effects.keys()]).keys()
 
         @classmethod
-        def get_op(cls, oplist, name):
-            if name != "(archdata.dma_ops)":
+        def get_op(cls, oplist, name, *, ispadding=False):
+            if name[0] != "(":
                 name = OptionList.Op.Cfg+name
             #print("{}:{}".format(oplist.name,name))
             existed = [x for x in oplist.ops if x.name == name]
@@ -65,7 +66,7 @@ class OptionList:
                 print("Error: duplicate option {}.".format(name))
                 exit()
             else:
-                newop = OptionList.Op(name)
+                newop = OptionList.Op(name, ispadding=ispadding)
                 oplist.ops.append(newop)
                 return newop
         
@@ -75,9 +76,9 @@ class OptionList:
             return newop
 
         @classmethod
-        def FullOp(cls, struct, name, bound, extrab, extram, deps=[], antimems = [],tradable = []):
+        def FullOp(cls, struct, name, bound, extrab, extram, deps=[], antimems = [],tradable = [], ispadding=False):
             oplist = struct.oplist
-            newop = cls.get_op(oplist,name)
+            newop = cls.get_op(oplist,name, ispadding=ispadding)
             deps = [OptionList.Op.Cfg+x for x in deps]
             tradable = [OptionList.Op.Cfg+x for x in tradable]
             for item in deps:
@@ -135,12 +136,12 @@ class OptionList:
         OptionList.Op.DirectOp(self, "TRACING")
         
 
-    def set_option(self, opname, val=True, suspected = False, force=False):
+    def set_option(self, opname, val=True, *, suspected = False, force=False):
         if opname not in [o.name for o in self.ops]:
             print ("Error: non-existing option {}!".format(opname))
             exit()
         op = self.get_option(opname)
-        if op.verified==True and op.set != val:
+        if op.verified==True and op.set != val and op.ispadding!=True:
             if not force:
                 print("Error: conflicting options: {}".format(opname))
                 import traceback
